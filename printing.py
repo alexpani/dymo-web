@@ -59,22 +59,26 @@ def get_media_options(printer_name):
     return []
 
 
+def _media_for(fmt):
+    """Pick CUPS media name: prefer explicit cups_media, fallback to Custom.WxHmm."""
+    if fmt.get('cups_media'):
+        return fmt['cups_media']
+    return f"Custom.{fmt['width_mm']}x{fmt['height_mm']}mm"
+
+
 def print_label(printer_name, image, format_index):
     """
     Print a PIL.Image to the given printer.
     Returns (ok: bool, message: str).
     """
-    name, width_mm, height_mm, code = FORMATS[format_index]
+    fmt = FORMATS[format_index]
 
-    # Save image to temp PNG
     tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
     try:
         image.save(tmp.name, format='PNG')
         tmp.close()
 
-        # Build lp command. Use Custom media size in millimeters.
-        media = f'Custom.{width_mm}x{height_mm}mm'
-
+        media = _media_for(fmt)
         cmd = [
             'lp',
             '-d', printer_name,
@@ -97,6 +101,6 @@ def print_label(printer_name, image, format_index):
 
 def build_print_command(printer_name, format_index, png_path='<png_temp>'):
     """Return the lp command that would be executed (for dry-run inspection)."""
-    name, width_mm, height_mm, code = FORMATS[format_index]
-    media = f'Custom.{width_mm}x{height_mm}mm'
+    fmt = FORMATS[format_index]
+    media = _media_for(fmt)
     return ['lp', '-d', printer_name, '-o', f'media={media}', '-o', 'fit-to-page', png_path]

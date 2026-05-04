@@ -19,8 +19,7 @@ def hello():
 def get_formats():
     """Return available label formats."""
     return jsonify([
-        {'index': i, 'name': name, 'width_mm': width, 'height_mm': height, 'code': code}
-        for i, (name, width, height, code) in enumerate(FORMATS)
+        {'index': i, **fmt} for i, fmt in enumerate(FORMATS)
     ])
 
 @app.route('/api/preview', methods=['POST'])

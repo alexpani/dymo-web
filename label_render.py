@@ -2,12 +2,13 @@ from PIL import Image, ImageDraw, ImageFont
 import qrcode
 import textwrap
 
-# Label formats: (name, width_mm, height_mm, dymo_code)
+# Label formats. cups_media = exact CUPS media name from `lpoptions -p <printer> -l`.
+# If cups_media is None, we fall back to Custom.WxHmm.
 FORMATS = [
-    ('89 × 36 mm (Address)', 89, 36, '99012'),
-    ('57 × 32 mm (Multipurpose)', 57, 32, '11354'),
-    ('32 × 57 mm (Multipurpose Vertical)', 32, 57, '11354'),
-    ('89 × 28 mm (Address Small)', 89, 28, '99010'),
+    {'name': '89 × 36 mm (Address, 99012)',         'width_mm': 89, 'height_mm': 36, 'code': '99012', 'cups_media': 'w101h252'},
+    {'name': '57 × 32 mm (Multipurpose, 11354)',    'width_mm': 57, 'height_mm': 32, 'code': '11354', 'cups_media': None},
+    {'name': '32 × 57 mm (Multipurpose vertical)',  'width_mm': 32, 'height_mm': 57, 'code': '11354', 'cups_media': None},
+    {'name': '89 × 28 mm (Address Small, 99010)',   'width_mm': 89, 'height_mm': 28, 'code': '99010', 'cups_media': 'w81h252'},
 ]
 
 DPI = 300
@@ -29,9 +30,9 @@ def render(format_index, text, qr_enabled, qr_content):
     Returns:
         PIL.Image (RGB)
     """
-    name, width_mm, height_mm, code = FORMATS[format_index]
-    width_px = mm_to_px(width_mm)
-    height_px = mm_to_px(height_mm)
+    fmt = FORMATS[format_index]
+    width_px = mm_to_px(fmt['width_mm'])
+    height_px = mm_to_px(fmt['height_mm'])
 
     # Create white background
     img = Image.new('RGB', (width_px, height_px), 'white')
