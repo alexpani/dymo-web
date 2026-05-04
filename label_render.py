@@ -1,6 +1,8 @@
 from PIL import Image, ImageDraw, ImageFont
 import qrcode
-import textwrap
+
+# macOS system font (always present)
+FONT_PATH = '/System/Library/Fonts/Helvetica.ttc'
 
 # Label formats. cups_media = exact CUPS media name from `lpoptions -p <printer> -l`.
 # If cups_media is None, we fall back to Custom.WxHmm.
@@ -63,37 +65,68 @@ def render(format_index, text, qr_enabled, qr_content):
         img.paste(qr_img, (x, y))
         qr_width = qr_img.size[0] + 10
 
-    # Text area
-    text_x = qr_width + 5
-    text_y = 5
-    text_width = width_px - text_x - 5
-    text_height = height_px - 10
+    # Text area (with small inner padding)
+    pad = mm_to_px(2)
+    text_x = qr_width + pad
+    text_y = pad
+    text_w = width_px - text_x - pad
+    text_h = height_px - 2 * pad
 
-    # Auto-scale font size
-    font_size = 30
-    while font_size > 8:
-        try:
-            font = ImageFont.load_default()
-            # Estimate lines needed
-            lines = textwrap.wrap(text, width=max(1, text_width // (font_size // 2)))
-            line_height = font_size + 4
-            total_height = len(lines) * line_height
-            if total_height <= text_height:
-                break
-        except:
-            pass
-        font_size -= 2
-
-    # Use default font (fixed width)
-    font = ImageFont.load_default()
-
-    # Wrap and draw text
-    lines = textwrap.wrap(text, width=max(1, text_width // 8))
-    y = text_y
-    for line in lines:
-        if y + 12 > text_y + text_height:
-            break
-        draw.text((text_x, y), line, fill='black', font=font)
-        y += 14
+    if text:
+        font, lines = _fit_text(text, text_w, text_h)
+        # Center vertically
+        line_h = font.getbbox('Ay')[3] - font.getbbox('Ay')[1]
+        total_h = line_h * len(lines) + (len(lines) - 1) * (line_h * 0.2)
+        y = text_y + max(0, (text_h - total_h) / 2)
+        for line in lines:
+            draw.text((text_x, y), line, fill='black', font=font)
+            y += line_h * 1.2
 
     return img
+
+
+def _wrap_text(text, font, max_width, draw):
+    """Word-wrap text to fit max_width pixels at given font size. Honors explicit \\n."""
+    out = []
+    for paragraph in text.splitlines() or ['']:
+        words = paragraph.split()
+        if not words:
+            out.append('')
+            continue
+        line = words[0]
+        for w in words[1:]:
+            test = line + ' ' + w
+            if draw.textlength(test, font=font) <= max_width:
+                line = test
+            else:
+                out.append(line)
+                line = w
+        out.append(line)
+    return out
+
+
+def _fit_text(text, max_width, max_height):
+    """
+    Find the largest font size where wrapped text fits in (max_width, max_height).
+    Returns (font, wrapped_lines).
+    """
+    # Use a throwaway image just for textlength measurement
+    tmp_img = Image.new('RGB', (1, 1))
+    tmp_draw = ImageDraw.Draw(tmp_img)
+
+    lo, hi = 8, 400
+    best = (ImageFont.truetype(FONT_PATH, lo), [text])
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        font = ImageFont.truetype(FONT_PATH, mid)
+        lines = _wrap_text(text, font, max_width, tmp_draw)
+        line_h = font.getbbox('Ay')[3] - font.getbbox('Ay')[1]
+        total_h = line_h * len(lines) + (len(lines) - 1) * (line_h * 0.2)
+        widest = max((tmp_draw.textlength(l, font=font) for l in lines), default=0)
+
+        if total_h <= max_height and widest <= max_width:
+            best = (font, lines)
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best

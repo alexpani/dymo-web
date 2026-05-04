@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dymo-web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "source .venv/bin/activate && python app.py"],
+      "port": 5050
+    }
+  ]
+}
