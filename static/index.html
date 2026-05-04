@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DYMO Label</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --border: #d2d2d7;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --accent: #0071e3;
+    --accent-hover: #0077ed;
+    --ok: #2e7d32;
+    --err: #c62828;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 1rem;
+  }
+  .container {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.4rem;
+    margin: 0 0 1rem;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.35rem;
+  }
+  select, input[type="text"], textarea {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: inherit;
+    background: white;
+    color: var(--text);
+  }
+  textarea {
+    resize: vertical;
+    min-height: 100px;
+  }
+  .row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .row:last-child { margin-bottom: 0; }
+  .row > label { margin: 0; flex-shrink: 0; }
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+  .checkbox-row label {
+    margin: 0;
+    color: var(--text);
+    font-size: 1rem;
+  }
+  .preview-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #fafafa;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    min-height: 120px;
+    overflow: auto;
+  }
+  .preview-wrap img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid #999;
+    background: white;
+  }
+  .preview-meta {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-align: center;
+  }
+  button.primary {
+    width: 100%;
+    padding: 0.85rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button.primary:hover { background: var(--accent-hover); }
+  button.primary:disabled { background: var(--muted); cursor: not-allowed; }
+  .status {
+    margin-top: 0.75rem;
+    padding: 0.6rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    display: none;
+  }
+  .status.ok { display: block; background: #e8f5e9; color: var(--ok); }
+  .status.err { display: block; background: #ffebee; color: var(--err); }
+  @media (max-width: 480px) {
+    body { padding: 0.5rem; }
+    h1 { font-size: 1.2rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🏷️ DYMO Label</h1>
+
+  <div class="card">
+    <label for="printer">Stampante</label>
+    <select id="printer"></select>
+  </div>
+
+  <div class="card">
+    <label for="format">Formato etichetta</label>
+    <select id="format"></select>
+  </div>
+
+  <div class="card">
+    <label for="text">Testo</label>
+    <textarea id="text" placeholder="Scrivi qui il testo dell'etichetta..."></textarea>
+
+    <div class="checkbox-row" style="margin-top: 0.75rem;">
+      <input type="checkbox" id="qr_enabled">
+      <label for="qr_enabled">Aggiungi QR code</label>
+    </div>
+    <input type="text" id="qr_content" placeholder="Contenuto del QR (URL, testo...)" disabled>
+  </div>
+
+  <div class="card">
+    <label>Anteprima</label>
+    <div class="preview-wrap">
+      <img id="preview" alt="anteprima etichetta">
+    </div>
+    <div class="preview-meta" id="preview_meta"></div>
+  </div>
+
+  <div class="card">
+    <button class="primary" id="print_btn">Stampa</button>
+    <div class="status" id="status"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let formats = [];
+let debounceTimer = null;
+
+async function loadPrinters() {
+  const res = await fetch('/api/printers');
+  const printers = await res.json();
+  const sel = $('printer');
+  sel.innerHTML = '';
+  if (printers.length === 0) {
+    const opt = document.createElement('option');
+    opt.textContent = 'Nessuna stampante trovata';
+    opt.disabled = true;
+    sel.appendChild(opt);
+    return;
+  }
+  printers.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.name;
+    opt.textContent = p.name + (p.is_default ? ' (default)' : '');
+    if (p.is_default) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  // Prefer DYMO Label slot if present (skip Tape)
+  const dymoLabel = [...sel.options].find(o =>
+    /dymo/i.test(o.value) && /label/i.test(o.value) && !/tape/i.test(o.value)
+  );
+  if (dymoLabel) sel.value = dymoLabel.value;
+}
+
+async function loadFormats() {
+  const res = await fetch('/api/formats');
+  formats = await res.json();
+  const sel = $('format');
+  sel.innerHTML = '';
+  formats.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.index;
+    opt.textContent = f.name;
+    sel.appendChild(opt);
+  });
+}
+
+function getPayload() {
+  return {
+    format: parseInt($('format').value, 10),
+    text: $('text').value,
+    qr_enabled: $('qr_enabled').checked,
+    qr_content: $('qr_content').value,
+  };
+}
+
+async function updatePreview() {
+  const payload = getPayload();
+  const fmt = formats[payload.format];
+  $('preview_meta').textContent = `${fmt.width_mm} × ${fmt.height_mm} mm — ${fmt.cups_media || 'Custom.' + fmt.width_mm + 'x' + fmt.height_mm + 'mm'}`;
+
+  try {
+    const res = await fetch('/api/preview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error('Preview error', res.status);
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const img = $('preview');
+    const old = img.src;
+    img.onload = () => { if (old.startsWith('blob:')) URL.revokeObjectURL(old); };
+    img.src = url;
+  } catch (e) {
+    console.error('Preview fetch failed', e);
+  }
+}
+
+function schedulePreview() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(updatePreview, 300);
+}
+
+async function doPrint() {
+  const btn = $('print_btn');
+  const status = $('status');
+  status.className = 'status';
+  status.textContent = '';
+
+  const payload = getPayload();
+  payload.printer_name = $('printer').value;
+
+  if (!payload.printer_name) {
+    status.className = 'status err';
+    status.textContent = 'Seleziona una stampante.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Stampa in corso...';
+  try {
+    const res = await fetch('/api/print', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      status.className = 'status ok';
+      status.textContent = data.message || 'Job inviato a CUPS.';
+    } else {
+      status.className = 'status err';
+      status.textContent = data.message || 'Errore di stampa.';
+    }
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = 'Errore di rete: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Stampa';
+  }
+}
+
+// Wire up events
+$('format').addEventListener('change', schedulePreview);
+$('text').addEventListener('input', schedulePreview);
+$('qr_enabled').addEventListener('change', () => {
+  $('qr_content').disabled = !$('qr_enabled').checked;
+  schedulePreview();
+});
+$('qr_content').addEventListener('input', schedulePreview);
+$('print_btn').addEventListener('click', doPrint);
+
+// Init
+(async () => {
+  await Promise.all([loadPrinters(), loadFormats()]);
+  $('text').value = 'Test';
+  updatePreview();
+})();
+</script>
+</body>
+</html>

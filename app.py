@@ -1,6 +1,6 @@
 import os
 import io
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from waitress import serve
 from dotenv import load_dotenv
 from label_render import FORMATS, render
@@ -8,12 +8,12 @@ from printing import list_printers, print_label
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
 port = int(os.getenv('PORT', 5050))
 
 @app.route('/')
-def hello():
-    return 'Hello from DYMO Label Web App'
+def index():
+    return send_from_directory('static', 'index.html')
 
 @app.route('/api/formats')
 def get_formats():
