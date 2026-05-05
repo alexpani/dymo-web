@@ -322,7 +322,10 @@ def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
     img = Image.new('RGB', (width_px, height_px), 'white')
     draw = ImageDraw.Draw(img)
 
-    has_text = any(r.get('text') for r in runs)
+    # Strip whitespace: contenteditable often leaves a stray '\n' from a <br>
+    # after the user clears the field — that would falsely keep has_text true
+    # and prevent the decor from centering.
+    has_text = any((r.get('text') or '').strip() for r in runs)
     has_decor = decor in ('qr', 'icon') and (
         (decor == 'qr' and qr_content) or (decor == 'icon' and icon_id)
     )
@@ -394,7 +397,7 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0, padding_mm
     pad_long = mm_to_px(padding_mm)
     text_h = height_px - 2 * pad_short
 
-    if not any(r.get('text') for r in runs):
+    if not any((r.get('text') or '').strip() for r in runs):
         return Image.new('RGB', (min_length_px, height_px), 'white')
 
     # No-wrap layout: each paragraph is its own line, width unconstrained.
