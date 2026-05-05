@@ -207,7 +207,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now dymo-web
 journalctl -u dymo-web -f   # log in tempo reale
 ```
 
-### Auto-deploy con `git push pi main`
+### Auto-deploy con `git push`
 Per non dover restartare a mano dopo ogni push, lancia una volta sul Pi:
 ```bash
 ./scripts/setup-pi-autodeploy.sh
@@ -217,9 +217,27 @@ Cosa installa:
 - `/opt/git/dymo-web.git/hooks/post-receive`: dopo ogni push su `main`, fa
   `git pull --ff-only` nel working copy + `sudo systemctl restart dymo-web`
 
-Da quel momento `git push pi main` dal Mac fa il deploy completo in <2 secondi.
-Output del push include le righe `[post-receive] deploying main ...` /
-`[post-receive] deploy done.`
+### Dual-push (GitHub + Pi in un solo comando)
+Lo sviluppo gira anche su [github.com/alexpani/dymo-web](https://github.com/alexpani/dymo-web).
+Configurando `origin` con due push URL, un singolo `git push origin main`
+manda i commit sia su GitHub (backup pubblico) sia sul Pi (deploy + restart):
+
+```bash
+git remote set-url --add --push origin https://github.com/alexpani/dymo-web.git
+git remote set-url --add --push origin alexpani@dymo.local:/opt/git/dymo-web.git
+```
+
+Output tipico:
+```
+To https://github.com/alexpani/dymo-web.git
+   <hash>..<hash>  main -> main
+remote: [post-receive] deploying main (<hash>)
+remote: [post-receive] deploy done.
+To dymo.local:/opt/git/dymo-web.git
+   <hash>..<hash>  main -> main
+```
+
+Da quel momento il workflow è: edit → `git commit` → `git push origin main` → fine.
 
 ### Deploy automatico (opzionale)
 Sul Pi, in `/opt/git/dymo-web.git/hooks/post-receive`:
