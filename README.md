@@ -207,6 +207,20 @@ sudo systemctl daemon-reload && sudo systemctl enable --now dymo-web
 journalctl -u dymo-web -f   # log in tempo reale
 ```
 
+### Auto-deploy con `git push pi main`
+Per non dover restartare a mano dopo ogni push, lancia una volta sul Pi:
+```bash
+./scripts/setup-pi-autodeploy.sh
+```
+Cosa installa:
+- `/etc/sudoers.d/dymo-web`: NOPASSWD per alexpani solo su `systemctl restart dymo-web`
+- `/opt/git/dymo-web.git/hooks/post-receive`: dopo ogni push su `main`, fa
+  `git pull --ff-only` nel working copy + `sudo systemctl restart dymo-web`
+
+Da quel momento `git push pi main` dal Mac fa il deploy completo in <2 secondi.
+Output del push include le righe `[post-receive] deploying main ...` /
+`[post-receive] deploy done.`
+
 ### Deploy automatico (opzionale)
 Sul Pi, in `/opt/git/dymo-web.git/hooks/post-receive`:
 ```bash
