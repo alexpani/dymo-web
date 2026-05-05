@@ -119,7 +119,9 @@ def _print_direct(cfg, image, media):
         png_path = png_tmp.name
 
     try:
-        opts = f"media={media} PageSize={media}"
+        # fit-to-page tells imagetoraster to scale the bitmap to the media size
+        # (otherwise a 1-2 px mismatch can spill onto a second label).
+        opts = f"media={media} PageSize={media} fit-to-page"
         cups_raster = _run_filter(
             [IMAGETORASTER, '1', os.environ.get('USER', 'web'), 'dymo-web', '1', opts],
             _filter_env(cfg['ppd'], 'image/png'),
