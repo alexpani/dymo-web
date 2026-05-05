@@ -1,9 +1,27 @@
+import platform
 import re
 from PIL import Image, ImageDraw, ImageFont
 import qrcode
 
-# macOS Helvetica TTC: 0=Regular 1=Bold 2=Oblique 3=BoldOblique
-FONT_PATH = '/System/Library/Fonts/Helvetica.ttc'
+# Cross-platform font face mapping. Key = (bold, italic), value = (path, ttc_index).
+# macOS uses Helvetica.ttc (one file, multiple faces via index).
+# Linux (Pi OS / Debian) uses DejaVu Sans (separate files per face).
+if platform.system() == 'Darwin':
+    _MAC_HELVETICA = '/System/Library/Fonts/Helvetica.ttc'
+    FONT_FACES = {
+        (False, False): (_MAC_HELVETICA, 0),
+        (True,  False): (_MAC_HELVETICA, 1),
+        (False, True):  (_MAC_HELVETICA, 2),
+        (True,  True):  (_MAC_HELVETICA, 3),
+    }
+else:
+    _DEJAVU = '/usr/share/fonts/truetype/dejavu/'
+    FONT_FACES = {
+        (False, False): (_DEJAVU + 'DejaVuSans.ttf', 0),
+        (True,  False): (_DEJAVU + 'DejaVuSans-Bold.ttf', 0),
+        (False, True):  (_DEJAVU + 'DejaVuSans-Oblique.ttf', 0),
+        (True,  True):  (_DEJAVU + 'DejaVuSans-BoldOblique.ttf', 0),
+    }
 
 FORMATS = [
     # Pre-cut adhesive labels (DYMO_LabelWriter_DUO_Label)
@@ -27,11 +45,12 @@ def mm_to_px(mm):
 
 
 def _load_font(size, bold=False, italic=False):
-    index = (1 if bold else 0) + (2 if italic else 0)
+    path, index = FONT_FACES.get((bool(bold), bool(italic)), FONT_FACES[(False, False)])
     try:
-        return ImageFont.truetype(FONT_PATH, size, index=index)
+        return ImageFont.truetype(path, size, index=index)
     except OSError:
-        return ImageFont.truetype(FONT_PATH, size, index=0)
+        regular_path, regular_index = FONT_FACES[(False, False)]
+        return ImageFont.truetype(regular_path, size, index=regular_index)
 
 
 def _font_cache(size):

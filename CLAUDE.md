@@ -41,14 +41,17 @@ static/index.html   Tutto il frontend in un solo file (HTML+CSS+JS).
 
 ## Lessons learned (gotchas reali, non ipotesi)
 
-### Driver DYMO è x86_64-only e fragile
+### Driver DYMO è x86_64-only su macOS (problema risolto via Pi)
 - `/Library/Printers/DYMO/Filters/UsbPrinterClassDriver.bundle` può sparire
   dopo update macOS. Reinstall DYMO Label v8 lo ripristina.
 - DYMO Connect for Desktop NON supporta la LabelWriter Duo dell'utente. Solo
   DYMO Label v8 (Sep 2020, x86_64).
-- Quando macOS toglierà Rosetta / supporto Intel, tutta la pipeline si rompe.
-  Le strade alternative discusse: pyusb diretto, libreria `labelle`. Decisione
-  attuale: **lasciamo così finché regge**, migrazione quando necessario.
+- **Soluzione adottata**: deploy permanente su **Raspberry Pi 4** (ARM64,
+  Raspberry Pi OS Lite). Driver DYMO open source via `printer-driver-dymo`,
+  niente più dipendenze Intel. Mac diventa solo client. Vedi sezione "Setup
+  su Raspberry Pi" in README.md.
+- Su Mac il setup originale rimane valido come dev/staging; il codice è
+  cross-platform via `FONT_FACES` in `label_render.py`.
 
 ### CUPS auto-disable
 Quando un job fallisce, CUPS **disabilita la stampante** e blocca la coda.
@@ -97,10 +100,13 @@ Se l'utente ha mai installato altre app su `localhost:5050` (l'utente aveva
 "pagina vuota" o app sbagliata anche se il server Flask risponde corretto a
 curl. Fix: unregister SW + clear cache da DevTools.
 
-### Helvetica.ttc per bold/italic
-`/System/Library/Fonts/Helvetica.ttc` indices: 0=Regular 1=Bold 2=Oblique
-3=BoldOblique. Calcolo: `index = (1 if bold else 0) + (2 if italic else 0)`.
-`_load_font()` ha try/except che fa fallback a Regular se l'index manca.
+### Font: cross-platform via FONT_FACES
+- macOS: `Helvetica.ttc` (1 file, 4 facce per index — Regular/Bold/Oblique/BoldOblique)
+- Linux (Pi): `DejaVuSans*.ttf` (4 file separati)
+- Mappa `FONT_FACES[(bold, italic)] = (path, index)` in `label_render.py`
+  inizializzata in base a `platform.system()`. `_load_font()` legge da lì
+  con fallback a Regular se la chiave manca.
+- Per cambiare font su una piattaforma, modifica solo quella sezione.
 
 ## Convenzioni di codice
 
