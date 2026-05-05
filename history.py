@@ -55,6 +55,11 @@ def _write_raw(items):
         raise
 
 
+def _fingerprint(payload):
+    """Stable canonical JSON of the payload, used for de-duplication."""
+    return json.dumps(payload or {}, sort_keys=True, separators=(',', ':'))
+
+
 def _make_thumb(pil_image):
     """Down-scale to THUMB_LONG_SIDE preserving aspect ratio, return base64 PNG."""
     img = pil_image.copy()
@@ -74,6 +79,11 @@ def add(payload, format_meta, pil_image):
     relevant chunk from FORMATS; `pil_image` is the rendered (printed) PNG.
     """
     items = _load_raw()
+    # De-dup: drop any existing entry with the same payload, then push fresh.
+    # The new entry inherits a new id and timestamp and naturally bubbles to
+    # the top — re-printing the same label doesn't accumulate duplicates.
+    fp = _fingerprint(payload)
+    items = [it for it in items if _fingerprint(it.get('payload')) != fp]
     entry = {
         'id': secrets.token_urlsafe(8),
         'ts': int(time.time()),

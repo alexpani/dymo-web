@@ -141,7 +141,23 @@ def history_page():
     return send_from_directory('static', 'history.html')
 
 
-@app.route('/api/history')
+@app.route('/api/history', methods=['POST'])
+def api_history_post():
+    """Save the current label as a draft entry — no print, just history."""
+    data = request.get_json() or {}
+    try:
+        kwargs = _render_kwargs(data, for_print=False)
+        img = render(**kwargs)
+        fmt = FORMATS[kwargs['format_index']]
+        meta = {'index': kwargs['format_index'], **fmt}
+        payload = {k: v for k, v in data.items() if k != 'printer_name'}
+        entry = history.add(payload, meta, img)
+        return jsonify({'ok': True, 'id': entry['id']})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@app.route('/api/history', methods=['GET'])
 def api_history_list():
     limit  = min(int(request.args.get('limit', 5)), 50)
     offset = max(int(request.args.get('offset', 0)), 0)

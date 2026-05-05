@@ -208,7 +208,7 @@
     text-align: center;
   }
   button.primary {
-    width: 100%;
+    flex: 1;
     padding: 0.85rem;
     background: var(--accent);
     color: white;
@@ -221,6 +221,21 @@
   }
   button.primary:hover { background: var(--accent-hover); }
   button.primary:disabled { background: var(--muted); cursor: not-allowed; }
+  button.secondary {
+    padding: 0.85rem 1rem;
+    background: white;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+  button.secondary:hover { background: #f0f0f3; }
+  button.secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .action-row { display: flex; gap: 0.5rem; }
   .status {
     margin-top: 0.75rem;
     padding: 0.6rem 0.8rem;
@@ -429,7 +444,10 @@
   </div>
 
   <div class="card">
-    <button class="primary" id="print_btn">Stampa</button>
+    <div class="action-row">
+      <button class="primary" id="print_btn">Stampa</button>
+      <button class="secondary" id="draft_btn" title="Salva nella cronologia senza stampare">Salva bozza</button>
+    </div>
     <div class="status" id="status"></div>
   </div>
 </div>
@@ -740,6 +758,38 @@ $('icon_search').addEventListener('input', () => {
   iconSearchTimer = setTimeout(() => searchIcons($('icon_search').value.trim()), 300);
 });
 $('print_btn').addEventListener('click', doPrint);
+
+async function saveDraft() {
+  const btn = $('draft_btn');
+  const status = $('status');
+  status.className = 'status';
+  status.textContent = '';
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'Salvataggio...';
+  try {
+    const res = await fetch('/api/history', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(getPayload()),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = 'Salvato ✓';
+      loadHistory();
+      setTimeout(() => { btn.disabled = false; btn.textContent = original; }, 1500);
+      return;
+    }
+    status.className = 'status err';
+    status.textContent = data.error || 'Errore salvataggio';
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = 'Errore di rete: ' + e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = original;
+}
+$('draft_btn').addEventListener('click', saveDraft);
 
 function applyFormat(cmd) {
   $('text').focus();
