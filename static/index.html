@@ -59,6 +59,25 @@
     resize: vertical;
     min-height: 100px;
   }
+  .rich-input {
+    width: 100%;
+    min-height: 100px;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: inherit;
+    background: white;
+    color: var(--text);
+    outline: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .rich-input:focus { border-color: var(--accent); }
+  .rich-input:empty::before {
+    content: attr(data-placeholder);
+    color: #aaa;
+  }
   .row {
     display: flex;
     gap: 0.75rem;
@@ -199,7 +218,8 @@
 
   <div class="card">
     <label for="text">Testo</label>
-    <textarea id="text" placeholder="Scrivi qui il testo dell'etichetta..."></textarea>
+    <div id="text" class="rich-input" contenteditable="true"
+         data-placeholder="Scrivi qui il testo dell'etichetta..."></div>
 
     <div class="toolbar">
       <button class="toggle-btn" id="bold_btn" title="Grassetto"><b>B</b></button>
@@ -283,20 +303,74 @@ async function loadFormats() {
   });
 }
 
-const state = { bold: false, italic: false, align: 'center' };
+const state = { align: 'center' };
+
+function extractRuns(root) {
+  const runs = [];
+  function pushNL() {
+    if (runs.length && !runs[runs.length-1].text.endsWith('\n')) {
+      runs.push({text: '\n', bold: false, italic: false});
+    }
+  }
+  function walk(node, bold, italic, isFirstBlock) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (node.textContent) runs.push({text: node.textContent, bold, italic});
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const tag = node.tagName;
+    if (tag === 'BR') {
+      runs.push({text: '\n', bold, italic});
+      return;
+    }
+    const isBlock = tag === 'DIV' || tag === 'P';
+    const cs = node.style || {};
+    const fw = (cs.fontWeight || '').toString();
+    const fs = (cs.fontStyle || '').toString();
+    const isB = bold  || tag === 'B' || tag === 'STRONG' || fw === 'bold' || parseInt(fw,10) >= 600;
+    const isI = italic || tag === 'I' || tag === 'EM'    || fs === 'italic';
+
+    if (isBlock && !isFirstBlock) pushNL();
+    let firstChildBlock = true;
+    for (const child of node.childNodes) {
+      walk(child, isB, isI, firstChildBlock);
+      firstChildBlock = false;
+    }
+  }
+  let first = true;
+  for (const child of root.childNodes) {
+    walk(child, false, false, first);
+    first = false;
+  }
+  // Compress adjacent runs with same style
+  const out = [];
+  for (const r of runs) {
+    if (out.length && out[out.length-1].bold === r.bold && out[out.length-1].italic === r.italic) {
+      out[out.length-1].text += r.text;
+    } else {
+      out.push({...r});
+    }
+  }
+  return out;
+}
 
 function getPayload() {
   const sliderVal = parseInt($('font_size').value, 10);
   return {
     format: parseInt($('format').value, 10),
-    text: $('text').value,
+    runs: extractRuns($('text')),
     qr_enabled: $('qr_enabled').checked,
     qr_content: $('qr_content').value,
-    bold: state.bold,
-    italic: state.italic,
     align: state.align,
     font_size_pt: sliderVal > 0 ? sliderVal : null,
   };
+}
+
+function syncFormatButtons() {
+  try {
+    $('bold_btn').classList.toggle('active', document.queryCommandState('bold'));
+    $('italic_btn').classList.toggle('active', document.queryCommandState('italic'));
+  } catch (e) {}
 }
 
 async function updatePreview() {
@@ -372,7 +446,12 @@ async function doPrint() {
 
 // Wire up events
 $('format').addEventListener('change', schedulePreview);
-$('text').addEventListener('input', schedulePreview);
+$('text').addEventListener('input', () => { syncFormatButtons(); schedulePreview(); });
+$('text').addEventListener('keyup', syncFormatButtons);
+$('text').addEventListener('mouseup', syncFormatButtons);
+document.addEventListener('selectionchange', () => {
+  if (document.activeElement === $('text')) syncFormatButtons();
+});
 $('qr_enabled').addEventListener('change', () => {
   $('qr_content').disabled = !$('qr_enabled').checked;
   schedulePreview();
@@ -380,16 +459,16 @@ $('qr_enabled').addEventListener('change', () => {
 $('qr_content').addEventListener('input', schedulePreview);
 $('print_btn').addEventListener('click', doPrint);
 
-$('bold_btn').addEventListener('click', () => {
-  state.bold = !state.bold;
-  $('bold_btn').classList.toggle('active', state.bold);
+function applyFormat(cmd) {
+  $('text').focus();
+  document.execCommand(cmd, false, null);
+  syncFormatButtons();
   schedulePreview();
-});
-$('italic_btn').addEventListener('click', () => {
-  state.italic = !state.italic;
-  $('italic_btn').classList.toggle('active', state.italic);
-  schedulePreview();
-});
+}
+$('bold_btn').addEventListener('mousedown', e => e.preventDefault());
+$('italic_btn').addEventListener('mousedown', e => e.preventDefault());
+$('bold_btn').addEventListener('click', () => applyFormat('bold'));
+$('italic_btn').addEventListener('click', () => applyFormat('italic'));
 $('align_group').querySelectorAll('.seg').forEach(btn => {
   btn.addEventListener('click', () => {
     state.align = btn.dataset.align;
@@ -417,7 +496,7 @@ $('font_size_reset').addEventListener('click', () => {
 // Init
 (async () => {
   await Promise.all([loadPrinters(), loadFormats()]);
-  $('text').value = 'Test';
+  $('text').textContent = 'Test';
   updatePreview();
 })();
 </script>

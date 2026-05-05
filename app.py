@@ -25,6 +25,7 @@ def get_formats():
 def _render_kwargs(data):
     return {
         'format_index': data.get('format', 0),
+        'runs': data.get('runs'),
         'text': data.get('text', ''),
         'qr_enabled': data.get('qr_enabled', False),
         'qr_content': data.get('qr_content', ''),
