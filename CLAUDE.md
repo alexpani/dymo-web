@@ -31,15 +31,40 @@ label_render.py     FORMATS (preset), render() che dispatch tra
                     _render_label() (dimensioni fisse) e _render_tape()
                     (lunghezza auto-fit), helpers per font, layout multi-run,
                     word-wrap.
-printing.py         list_printers() (parsa lpstat italiano e inglese),
-                    print_label() (rotazione PNG per tape, media custom esatto,
-                    no fit-to-page per tape).
+printing.py         Due path stampa con auto-select:
+                    - DIRECT USB (Linux/Pi): pipe imagetoraster + raster2dymo[lw|lm]
+                      (CUPS filter binaries via subprocess) e write a /dev/usb/lpN.
+                      Salta il backend USB di CUPS. ~istantaneo.
+                    - CUPS lp (macOS dev/staging): subprocess `lp` come fallback.
+                    list_printers() advertise i 2 device direct in modalità Linux
+                    o parsa lpstat (Mac).
 static/index.html   Tutto il frontend in un solo file (HTML+CSS+JS).
                     contenteditable per il rich text, B/I via execCommand.
 .claude/launch.json Config per il preview server di Claude Code.
 ```
 
 ## Lessons learned (gotchas reali, non ipotesi)
+
+### Backend CUPS USB della DYMO Duo è LENTISSIMO (risolto via direct USB)
+Il backend USB di CUPS impiega ~25-27 secondi a consegnare 5KB alla DYMO Duo
+(stampante anziana, polling bidirezionale lento). I filter `imagetoraster` e
+`raster2dymolw` standalone sono velocissimi (~30ms ciascuno), e una write
+diretta a `/dev/usb/lp0` è sub-secondo.
+
+Fix adottato in `printing.py._print_direct()`:
+- pipe PNG → imagetoraster (subprocess) → raster2dymo[lw|lm] (subprocess)
+- write bytes risultanti direttamente a `/dev/usb/lp0` (label) o `/dev/usb/lp1` (tape)
+- CUPS code stampa restano installate ma `cupsdisable`d (servono i loro PPD)
+- Alexpani in gruppo `lp` per scrivere su `/dev/usb/lpN`
+- Setup tutto in `scripts/setup-pi-direct-usb.sh`
+
+Risultato: 33s → istantaneo. Ricontrollare se la pipeline standalone si
+rompe dopo update di `printer-driver-dymo` o `cups-filters`.
+
+### `usblp` kernel module DEVE essere caricato (non blacklistato)
+Storia: nella prima versione della guida l'avevo blacklistato per evitare
+"conflitti col driver DYMO". Era sbagliato — serve proprio `usblp` per
+esporre `/dev/usb/lpN`. La via direct USB richiede `usblp` attivo.
 
 ### Driver DYMO è x86_64-only su macOS (problema risolto via Pi)
 - `/Library/Printers/DYMO/Filters/UsbPrinterClassDriver.bundle` può sparire

@@ -69,19 +69,40 @@ Se non c'è, lascia `cups_media: None` e il backend userà `Custom.WxHmm`.
 
 - **Backend**: Python 3.12 + Flask + waitress
 - **Rendering**: Pillow (300 DPI), `qrcode[pil]`
-- **Stampa**: subprocess su `lp` di CUPS
+- **Stampa**:
+  - **Linux/Pi**: pipeline `imagetoraster | raster2dymo[lw|lm]` (CUPS filter
+    binaries via subprocess) + write diretto a `/dev/usb/lpN`. **Bypassa il
+    backend USB di CUPS** che era il collo di bottiglia (~30s → istantaneo).
+  - **macOS**: fallback su `lp` (auto-detect: se `/dev/usb/lp*` non sono
+    accessibili usa CUPS classico).
 - **Frontend**: HTML + CSS + JS vanilla in `static/index.html`, no framework, no build
 - **Persistenza**: nessuna
 
+## Architettura "Direct USB" (Pi)
+
+```
+PIL render (PNG, ~30ms)
+    ↓
+imagetoraster (CUPS filter binary, subprocess) → cups-raster (~30ms)
+    ↓
+raster2dymolw / raster2dymolm (CUPS filter binary, subprocess) → DYMO native bytes (~30ms)
+    ↓
+write to /dev/usb/lp0 (label) or /dev/usb/lp1 (tape) (~10ms)
+```
+
+Niente `lp`, niente `cupsd` in mezzo. Le code CUPS DYMO vengono comunque
+**lasciate installate ma disabilitate** (`cupsdisable`) perché ci serve
+ancora il loro PPD per i CUPS filter binari.
+
 ## Dipendenza dai driver DYMO
 
-Questa app delega tutta la comunicazione USB a CUPS, che a sua volta usa i driver
-DYMO ufficiali (`/Library/Printers/DYMO/`). Quei driver sono **x86_64-only** e
-DYMO ne sconsiglia l'uso sulle prossime versioni di macOS Apple Silicon.
+Su Linux il pacchetto `printer-driver-dymo` (open source, in Debian) fornisce
+i filter `raster2dymolw` / `raster2dymolm` che sappiamo essere veloci e affidabili.
+Niente kext, niente drivers Intel-only, niente Rosetta.
 
-Su macOS funziona finché Rosetta è disponibile. Per uso "permanente" si consiglia
-di spostare il server su un Raspberry Pi (vedi sezione sotto): su Linux ARM64 i
-driver DYMO sono open source e mantenuti.
+Su macOS l'app funziona via CUPS finché ci sono i driver DYMO ufficiali, ma
+quei driver sono x86_64-only e DYMO ne sconsiglia l'uso su Apple Silicon
+recente. Per uso "permanente" si consiglia il Pi.
 
 ## Setup su Raspberry Pi (deploy permanente)
 
@@ -95,28 +116,51 @@ browser.
    user/password, Wi-Fi se serve, locale `Europe/Rome`
 3. Flash, inserisci nel Pi, alimenta
 
-### Setup sistema (sul Pi via SSH `pani@dymo.local`)
+### Setup sistema (sul Pi via SSH `alexalexpani@dymo.local`)
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y python3-venv python3-pip cups printer-driver-dymo \
                     fonts-dejavu git
 sudo usermod -aG lpadmin $USER
 
-# Blacklist usblp (interferisce con DYMO)
-echo 'blacklist usblp' | sudo tee /etc/modprobe.d/blacklist-usblp.conf
-sudo modprobe -r usblp || true
-
 # CUPS accessibile in rete (per amministrare via http://dymo.local:631)
 sudo cupsctl --remote-admin --remote-any --share-printers
 sudo systemctl enable --now cups
 ```
 
-### Aggiunta DYMO
-Collega la DYMO via USB al Pi, poi dal Mac apri `http://dymo.local:631` →
-*Administration → Add Printer* e aggiungi entrambe le code (Label e Tape).
-Annota i nomi con `lpstat -p`. Per ognuna:
+### Aggiunta DYMO (CUPS) — serve solo per ottenere i PPD
+Collega la DYMO via USB al Pi e aggiungi le due code via CLI:
 ```bash
-lpadmin -p <nome> -o printer-error-policy=retry-current-job
+sudo lpadmin -p DYMO_LabelWriter_DUO_Label -E \
+  -v 'usb://DYMO/LabelWriter%20DUO%20Label?serial=<SERIAL>' \
+  -m dymo:0/cups/model/lwduol.ppd
+sudo lpadmin -p DYMO_LabelWriter_DUO_Tape_128 -E \
+  -v 'usb://DYMO/LabelWriter%20DUO%20Tape%20128?serial=<SERIAL>&interface=1' \
+  -m dymo:0/cups/model/lwduot2.ppd
+```
+(`<SERIAL>` lo trovi con `lpinfo -v | grep -i dymo`.)
+
+In alternativa, le puoi aggiungere graficamente dal Mac via `http://dymo.local:631`.
+
+### Direct USB (sblocca la velocità ~istantanea)
+Il backend USB di CUPS è troppo lento per la DYMO Duo (~30s a etichetta).
+Lo script `scripts/setup-pi-direct-usb.sh` configura la pipeline diretta:
+
+```bash
+./scripts/setup-pi-direct-usb.sh
+```
+
+Cosa fa (tutto idempotente, sudo password una volta):
+- Aggiunge `alexpani` al gruppo `lp` (per scrivere su `/dev/usb/lpN`)
+- Installa una udev rule che porta `/dev/usb/lpN` a permessi `lp` group
+- Disabilita le code CUPS DYMO (`cupsdisable` + `cupsreject`) — restano
+  installate ma non accettano job, così il loro PPD resta utilizzabile
+- Verifica che `/dev/usb/lp0` (label) e `/dev/usb/lp1` (tape) siano scrivibili
+
+**Importante**: dopo lo script, rifare login SSH (per ricaricare il gruppo `lp`)
+oppure restartare il service:
+```bash
+sudo systemctl restart dymo-web
 ```
 
 ### Bare repo Git + push dal Mac
@@ -128,7 +172,7 @@ git init --bare /opt/git/dymo-web.git
 Sul Mac:
 ```bash
 cd ~/Claude\ Code/dymo-web
-git remote add pi pani@dymo.local:/opt/git/dymo-web.git
+git remote add pi alexpani@dymo.local:/opt/git/dymo-web.git
 git push pi main
 ```
 Sul Pi:
@@ -148,10 +192,10 @@ Requires=cups.service
 
 [Service]
 Type=simple
-User=pani
-WorkingDirectory=/home/pani/dymo-web
+User=alexpani
+WorkingDirectory=/home/alexpani/dymo-web
 Environment=PORT=5050
-ExecStart=/home/pani/dymo-web/.venv/bin/python app.py
+ExecStart=/home/alexpani/dymo-web/.venv/bin/python app.py
 Restart=on-failure
 RestartSec=5
 
