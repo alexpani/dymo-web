@@ -253,8 +253,11 @@ def _render_tape(fmt, runs, align, font_size_pt):
     min_length_px = mm_to_px(fmt['height_mm'])    # minimum PNG length
     max_length_px = mm_to_px(1400)                # cap (CUPS w*h4000 ~= 1411 mm)
 
-    pad_short = mm_to_px(1)   # vertical padding (along tape width)
-    pad_long = mm_to_px(2)    # horizontal padding (along tape length)
+    # On narrow tape (9mm) a 1mm pad leaves too little visual breathing room
+    # and the auto-fit pushes the font to the absolute max. 1.5mm gives a
+    # better-looking result without wasting much surface.
+    pad_short = mm_to_px(1.5)
+    pad_long = mm_to_px(2)
     text_h = height_px - 2 * pad_short
 
     if not any(r.get('text') for r in runs):
@@ -281,9 +284,30 @@ def _render_tape(fmt, runs, align, font_size_pt):
 
 
 def _draw_lines(draw, lines, get_font, text_x, text_y, text_w, text_h, line_h, align):
-    total_h = len(lines) * line_h + max(0, len(lines) - 1) * (line_h * 0.2)
-    y = text_y + max(0, (text_h - total_h) / 2)
+    """
+    Draws each line and centers the whole block vertically based on the
+    *visual* glyph height (not the font's full ascent+descent) so single-line
+    text without descenders doesn't drift towards the bottom.
+
+    Uses anchor='lt' so (x, y) is the exact top-left of the rendered glyph
+    bounding box — independent of font internal padding.
+    """
+    spacing = 0.2  # 20% inter-line gap
+
+    # Per-line visual height = max bbox height across the line's fragments
+    line_visual_hs = []
     for line in lines:
+        h = 0
+        for fr in line:
+            f = get_font(fr['bold'], fr['italic'])
+            bbox = f.getbbox(fr['text'])
+            h = max(h, bbox[3] - bbox[1])
+        line_visual_hs.append(h or line_h)
+
+    total_h = sum(line_visual_hs) + sum(h * spacing for h in line_visual_hs[:-1])
+    y = text_y + max(0, (text_h - total_h) / 2)
+
+    for line, lvh in zip(lines, line_visual_hs):
         line_w = sum(draw.textlength(fr['text'], font=get_font(fr['bold'], fr['italic'])) for fr in line)
         if align == 'right':
             x = text_x + text_w - line_w
@@ -293,6 +317,6 @@ def _draw_lines(draw, lines, get_font, text_x, text_y, text_w, text_h, line_h, a
             x = text_x + (text_w - line_w) / 2
         for fr in line:
             font = get_font(fr['bold'], fr['italic'])
-            draw.text((x, y), fr['text'], fill='black', font=font)
+            draw.text((x, y), fr['text'], fill='black', font=font, anchor='lt')
             x += draw.textlength(fr['text'], font=font)
-        y += line_h * 1.2
+        y += lvh * (1 + spacing)
