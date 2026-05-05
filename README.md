@@ -25,12 +25,20 @@ sulla stessa rete.
 
 ## Preset etichette
 
-| Preset                       | Codice | Media CUPS    |
-| ---------------------------- | ------ | ------------- |
-| 89 × 36 mm Address           | 99012  | `w101h252`    |
-| 89 × 28 mm Address Small     | 99010  | `w81h252`     |
-| 57 × 32 mm Multipurpose      | 11354  | `w162h90`     |
-| 32 × 57 mm Multipurpose vert | 11354  | `w162h90`     |
+| Preset                       | Codice | Media CUPS              |
+| ---------------------------- | ------ | ----------------------- |
+| 89 × 36 mm Address           | 99012  | `w101h252`              |
+| 89 × 28 mm Address Small     | 99010  | `w81h252`               |
+| 57 × 32 mm Multipurpose      | 11354  | `w162h90`               |
+| 32 × 57 mm Multipurpose vert | 11354  | `w162h90`               |
+| Nastro 9 mm  (auto-fit)      | D1-9   | `Custom.9xLENGTHmm`     |
+| Nastro 12 mm (auto-fit)      | D1-12  | `Custom.12xLENGTHmm`    |
+| Nastro 19 mm (auto-fit)      | D1-19  | `Custom.19xLENGTHmm`    |
+| Nastro 24 mm (auto-fit)      | D1-24  | `Custom.24xLENGTHmm`    |
+
+I preset Tape (`kind: 'tape'`) hanno **lunghezza variabile**: il PNG viene
+ruotato in portrait e la lunghezza è calcolata dal contenuto. La stampante
+Tape viene autoselezionata quando scegli un preset Nastro.
 
 Per aggiungere un preset: edita la lista `FORMATS` in `label_render.py`. Il campo
 `cups_media` deve essere uno dei nomi esposti da:
@@ -68,6 +76,19 @@ grep "11354\|99012\|99010" /etc/cups/ppd/DYMO_LabelWriter_DUO_Label.ppd | head
 ```
 
 Aggiorna `cups_media` nel relativo preset.
+
+### La stampante Tape si disabilita dopo un errore
+
+Dopo un job fallito CUPS può disabilitare la stampante e bloccare la coda.
+Riabilitala una volta sola:
+
+```bash
+cupsenable DYMO_LabelWriter_DUO_Tape_128
+lpadmin -p DYMO_LabelWriter_DUO_Tape_128 -o printer-error-policy=retry-current-job
+```
+
+Il secondo comando configura CUPS a riprovare invece di disabilitare la
+stampante al primo errore (persistente in `/etc/cups/printers.conf`).
 
 ## Stack
 
