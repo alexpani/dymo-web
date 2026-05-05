@@ -56,6 +56,7 @@ def _render_kwargs(data, for_print=False):
         'italic': data.get('italic', False),
         'align': data.get('align', 'center'),
         'font_size_pt': data.get('font_size_pt') or None,
+        'line_spacing': data.get('line_spacing') if data.get('line_spacing') is not None else 0.2,
         # per-preset overrides (server-side authoritative)
         'auto_fit_safety': overrides['auto_fit_safety'],
         'padding_mm':      overrides['padding_mm'],

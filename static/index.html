@@ -406,6 +406,12 @@
       <button class="toggle-btn" id="font_size_reset" title="Torna ad Auto" disabled>Auto</button>
     </div>
 
+    <div class="size-row">
+      <label for="line_spacing" style="margin:0">Interlinea</label>
+      <input type="range" id="line_spacing" min="0" max="100" step="5" value="20">
+      <span class="size-label" id="line_spacing_label">20%</span>
+    </div>
+
     <div class="decor-row" style="margin-top: 0.9rem;">
       <label style="margin: 0 0.5rem 0 0">Decoro</label>
       <div class="seg-group" id="decor_mode">
@@ -610,6 +616,7 @@ function getPayload() {
     decor_position: $('decor_position').value,
     align: state.align,
     font_size_pt: sliderVal > 0 ? sliderVal : null,
+    line_spacing: parseInt($('line_spacing').value, 10) / 100,
   };
 }
 
@@ -824,6 +831,10 @@ $('font_size_reset').addEventListener('click', () => {
   syncFontSizeUI();
   schedulePreview();
 });
+$('line_spacing').addEventListener('input', () => {
+  $('line_spacing_label').textContent = $('line_spacing').value + '%';
+  schedulePreview();
+});
 
 // ── History ──────────────────────────────────────────────────────────────
 function escapeHtml(s) {
@@ -864,6 +875,9 @@ function applyPayload(payload) {
   const sz = payload.font_size_pt || 0;
   $('font_size').value = sz;
   syncFontSizeUI();
+  const ls = (payload.line_spacing != null ? Math.round(payload.line_spacing * 100) : 20);
+  $('line_spacing').value = ls;
+  $('line_spacing_label').textContent = ls + '%';
   updatePreview();
 }
 
