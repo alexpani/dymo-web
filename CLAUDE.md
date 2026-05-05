@@ -43,6 +43,8 @@ presets_store.py    JSON store ~/.config/dymo-web/preset_overrides.json (writabl
                     that wrote to /etc/dymo-web). Per-preset overrides keyed by
                     preset 'name': offset_x/y_mm, auto_fit_safety, padding_mm.
                     DEFAULTS define the values used when no override exists.
+                    Server-side authoritative: app._render_kwargs() applies
+                    overrides automatically; clients never pass them.
 static/presets.html Pagina /presets: lista preset, click per espandere form
                     di override (offset, safety, padding) con Salva/Reset.
 scripts/update-deps.sh  Aggiorna pacchetti Pi quando cambiano le dependencies
@@ -98,6 +100,18 @@ lpadmin -p DYMO_LabelWriter_DUO_Tape_128 -o printer-error-policy=retry-current-j
 ```
 
 Il secondo comando è già stato applicato sul Mac dell'utente (persistente).
+
+### Anteprima vs stampa: due percorsi distinti per l'offset meccanico
+`presets_store` espone `offset_x_mm` / `offset_y_mm` per compensare
+disallineamenti fisici della stampante (es. la 11354 esce 1mm a sinistra).
+**Va applicato solo alla stampa**, NON all'anteprima: se applicato anche
+all'anteprima, l'utente vede il contenuto traslato e crede sia un bug
+del rendering. `app._render_kwargs(data, for_print=False)` azzera gli
+offset; `for_print=True` li lascia. `/api/preview` usa False, `/api/print`
+usa True.
+
+Padding e auto-fit safety invece sono applicati a entrambi (sono scelte
+di layout, non compensazioni hardware).
 
 ### Duo = due stampanti CUPS distinte
 La LabelWriter Duo si presenta a CUPS come **due code separate**:

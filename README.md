@@ -23,9 +23,9 @@ stessa rete Wi-Fi e stampa.
   (~150k icone ricercabili da una sola search box). Posizionabile sx/dx/sopra/sotto
   rispetto al testo, oppure centrato se l'etichetta non ha testo.
 - **Gestore preset** (icona ⚙ in alto a destra → `/presets`): per ogni preset
-  puoi regolare offset stampa X/Y in mm (compensazione meccanica), margine
-  auto-fit del font, e padding interno. Override salvati in
-  `~/.config/dymo-web/preset_overrides.json`.
+  puoi regolare offset stampa X/Y in mm (compensazione meccanica — applicato
+  solo alla stampa, l'anteprima resta nominale), margine auto-fit del font, e
+  padding interno. Override salvati in `~/.config/dymo-web/preset_overrides.json`.
 - **Anteprima live** con debounce 300 ms.
 
 ## Setup
@@ -270,6 +270,23 @@ Da quel momento in poi: `git push pi main` dal Mac fa deploy automatico in <5s.
 - I `cups_media` dei preset sono validati per i PPD macOS DYMO. Su Linux i nomi
   potrebbero differire — verifica con `lpoptions -p <nome> -l` e aggiorna
   `FORMATS` se serve.
+
+## Tarare l'offset di stampa
+
+Se la stampa esce sistematicamente spostata (es. la 11354 fuoriesce di 1 mm
+a sinistra rispetto al bordo dell'etichetta):
+
+1. Stampa una etichetta di test con un contenuto centrato chiaro (es. solo
+   un quadrato nero o "Centro").
+2. Misura lo scostamento con un righello: in che direzione, quanti mm.
+3. Apri **http://dymo.local:5050/presets**, click sul preset.
+4. **Offset X**: positivo sposta il contenuto a destra, negativo a sinistra.
+   Se la stampa esce 1 mm troppo a sinistra → metti `1.0`. Stesso per Y
+   (positivo = giù, negativo = su). Step 0.1 mm.
+5. Salva e ristampa. Aggiusta finché è centrato.
+
+L'**anteprima resta nominale** durante la taratura (l'offset è una
+compensazione meccanica della stampante, non una modifica del layout).
 
 ## Troubleshooting
 
