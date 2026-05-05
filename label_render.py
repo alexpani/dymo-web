@@ -24,11 +24,13 @@ else:
     }
 
 FORMATS = [
-    # Pre-cut adhesive labels (DYMO_LabelWriter_DUO_Label)
-    {'name': '89 × 36 mm (Address, 99012)',         'width_mm': 89, 'height_mm': 36, 'code': '99012', 'cups_media': 'w101h252', 'kind': 'label'},
-    {'name': '57 × 32 mm (Multipurpose, 11354)',    'width_mm': 57, 'height_mm': 32, 'code': '11354', 'cups_media': 'w162h90',  'kind': 'label'},
-    {'name': '32 × 57 mm (Multipurpose vertical)',  'width_mm': 32, 'height_mm': 57, 'code': '11354', 'cups_media': 'w162h90',  'kind': 'label'},
-    {'name': '89 × 28 mm (Address Small, 99010)',   'width_mm': 89, 'height_mm': 28, 'code': '99010', 'cups_media': 'w81h252',  'kind': 'label'},
+    # Pre-cut adhesive labels (DYMO_LabelWriter_DUO_Label).
+    # cups_media can be a string (same on all platforms) or a dict keyed by
+    # platform.system() for the few cases where the PPDs disagree on names.
+    {'name': '89 × 36 mm (Address, 99012)',         'width_mm': 89, 'height_mm': 36, 'code': '99012', 'cups_media': {'Darwin': 'w101h252', 'Linux': 'w102h252.1'}, 'kind': 'label'},
+    {'name': '57 × 32 mm (Multipurpose, 11354)',    'width_mm': 57, 'height_mm': 32, 'code': '11354', 'cups_media': 'w162h90', 'kind': 'label'},
+    {'name': '32 × 57 mm (Multipurpose vertical)',  'width_mm': 32, 'height_mm': 57, 'code': '11354', 'cups_media': 'w162h90', 'kind': 'label'},
+    {'name': '89 × 28 mm (Address Small, 99010)',   'width_mm': 89, 'height_mm': 28, 'code': '99010', 'cups_media': {'Darwin': 'w81h252',  'Linux': 'w79h252.2'}, 'kind': 'label'},
     # Continuous D1 tape (DYMO_LabelWriter_DUO_Tape_*). width_mm = tape width,
     # height_mm = minimum length; actual length is auto-fit to content.
     {'name': 'Nastro 9 mm  (auto-fit)',             'width_mm': 9,  'height_mm': 25, 'code': 'D1-9',  'cups_media': 'w26h4000', 'kind': 'tape'},
@@ -36,6 +38,14 @@ FORMATS = [
     {'name': 'Nastro 19 mm (auto-fit)',             'width_mm': 19, 'height_mm': 25, 'code': 'D1-19', 'cups_media': 'w55h4000', 'kind': 'tape'},
     {'name': 'Nastro 24 mm (auto-fit)',             'width_mm': 24, 'height_mm': 25, 'code': 'D1-24', 'cups_media': 'w68h4000', 'kind': 'tape'},
 ]
+
+
+def resolve_cups_media(fmt):
+    """Return the CUPS media name appropriate for the current platform."""
+    media = fmt.get('cups_media')
+    if isinstance(media, dict):
+        return media.get(platform.system())
+    return media
 
 DPI = 300
 

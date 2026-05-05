@@ -1,7 +1,7 @@
 import subprocess
 import tempfile
 import os
-from label_render import FORMATS, DPI
+from label_render import FORMATS, DPI, resolve_cups_media
 
 def list_printers():
     """Return list of CUPS printers as [{name, is_default}]."""
@@ -80,10 +80,7 @@ def _print_args(fmt, image):
         media = f"Custom.{fmt['width_mm']}x{length_mm}mm"
         return rotated, media, []
 
-    if fmt.get('cups_media'):
-        media = fmt['cups_media']
-    else:
-        media = f"Custom.{fmt['width_mm']}x{fmt['height_mm']}mm"
+    media = resolve_cups_media(fmt) or f"Custom.{fmt['width_mm']}x{fmt['height_mm']}mm"
     return image, media, ['-o', 'fit-to-page']
 
 
@@ -120,8 +117,5 @@ def build_print_command(printer_name, format_index, png_path='<png_temp>'):
         # length placeholder; real length depends on rendered image
         media = f"Custom.{fmt['width_mm']}xL_mm"
         return ['lp', '-d', printer_name, '-o', f'media={media}', png_path]
-    if fmt.get('cups_media'):
-        media = fmt['cups_media']
-    else:
-        media = f"Custom.{fmt['width_mm']}x{fmt['height_mm']}mm"
+    media = resolve_cups_media(fmt) or f"Custom.{fmt['width_mm']}x{fmt['height_mm']}mm"
     return ['lp', '-d', printer_name, '-o', f'media={media}', '-o', 'fit-to-page', png_path]

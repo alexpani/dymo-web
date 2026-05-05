@@ -3,7 +3,7 @@ import io
 from flask import Flask, jsonify, request, send_from_directory
 from waitress import serve
 from dotenv import load_dotenv
-from label_render import FORMATS, render
+from label_render import FORMATS, render, resolve_cups_media
 from printing import list_printers, print_label
 
 load_dotenv()
@@ -17,9 +17,11 @@ def index():
 
 @app.route('/api/formats')
 def get_formats():
-    """Return available label formats."""
+    """Return available label formats. cups_media is resolved to the string
+    appropriate for the current platform (PPDs differ between macOS and Linux)."""
     return jsonify([
-        {'index': i, **fmt} for i, fmt in enumerate(FORMATS)
+        {'index': i, **fmt, 'cups_media': resolve_cups_media(fmt)}
+        for i, fmt in enumerate(FORMATS)
     ])
 
 def _render_kwargs(data):
