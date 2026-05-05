@@ -162,7 +162,8 @@
     min-width: 2.2rem;
   }
   .toggle-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-  .toggle-btn:hover:not(.active) { background: #f0f0f3; }
+  .toggle-btn:hover:not(.active):not(:disabled) { background: #f0f0f3; }
+  .toggle-btn:disabled { opacity: 0.4; cursor: default; }
   .size-row {
     display: flex;
     align-items: center;
@@ -214,6 +215,7 @@
       <label for="font_size" style="margin:0">Dim. font</label>
       <input type="range" id="font_size" min="0" max="200" step="2" value="0">
       <span class="size-label" id="font_size_label">Auto</span>
+      <button class="toggle-btn" id="font_size_reset" title="Torna ad Auto" disabled>Auto</button>
     </div>
 
     <div class="checkbox-row" style="margin-top: 0.75rem;">
@@ -397,9 +399,18 @@ $('align_group').querySelectorAll('.seg').forEach(btn => {
     schedulePreview();
   });
 });
-$('font_size').addEventListener('input', () => {
+function syncFontSizeUI() {
   const v = parseInt($('font_size').value, 10);
   $('font_size_label').textContent = v > 0 ? v + ' pt' : 'Auto';
+  $('font_size_reset').disabled = v === 0;
+}
+$('font_size').addEventListener('input', () => {
+  syncFontSizeUI();
+  schedulePreview();
+});
+$('font_size_reset').addEventListener('click', () => {
+  $('font_size').value = 0;
+  syncFontSizeUI();
   schedulePreview();
 });
 
