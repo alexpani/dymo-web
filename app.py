@@ -28,7 +28,15 @@ def get_formats():
         for i, fmt in enumerate(FORMATS)
     ])
 
-def _render_kwargs(data):
+def _render_kwargs(data, for_print=False):
+    """
+    Build render() kwargs from the API payload + per-preset overrides.
+
+    The mechanical print offset (offset_x/y_mm) compensates a printer-side
+    misalignment, so it must be applied to the bytes sent to the printer
+    but NOT to the on-screen preview — otherwise the preview shows the
+    shifted layout, which is misleading. We force offsets to 0 for previews.
+    """
     fmt_index = data.get('format', 0)
     fmt = FORMATS[fmt_index] if 0 <= fmt_index < len(FORMATS) else FORMATS[0]
     overrides = presets_store.get(fmt['name'])
@@ -50,15 +58,15 @@ def _render_kwargs(data):
         # per-preset overrides (server-side authoritative)
         'auto_fit_safety': overrides['auto_fit_safety'],
         'padding_mm':      overrides['padding_mm'],
-        'offset_x_mm':     overrides['offset_x_mm'],
-        'offset_y_mm':     overrides['offset_y_mm'],
+        'offset_x_mm':     overrides['offset_x_mm'] if for_print else 0.0,
+        'offset_y_mm':     overrides['offset_y_mm'] if for_print else 0.0,
     }
 
 @app.route('/api/preview', methods=['POST'])
 def preview():
     """Generate and return a preview PNG."""
     try:
-        img = render(**_render_kwargs(request.get_json()))
+        img = render(**_render_kwargs(request.get_json(), for_print=False))
         buf = io.BytesIO()
         img.save(buf, format='PNG')
         buf.seek(0)
@@ -80,7 +88,7 @@ def print_endpoint():
         return jsonify({'ok': False, 'message': 'printer_name is required'}), 400
 
     try:
-        kwargs = _render_kwargs(data)
+        kwargs = _render_kwargs(data, for_print=True)
         img = render(**kwargs)
         ok, message = print_label(printer_name, img, kwargs['format_index'])
         return jsonify({'ok': ok, 'message': message})
