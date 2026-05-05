@@ -22,17 +22,23 @@ def get_formats():
         {'index': i, **fmt} for i, fmt in enumerate(FORMATS)
     ])
 
+def _render_kwargs(data):
+    return {
+        'format_index': data.get('format', 0),
+        'text': data.get('text', ''),
+        'qr_enabled': data.get('qr_enabled', False),
+        'qr_content': data.get('qr_content', ''),
+        'bold': data.get('bold', False),
+        'italic': data.get('italic', False),
+        'align': data.get('align', 'center'),
+        'font_size_pt': data.get('font_size_pt') or None,
+    }
+
 @app.route('/api/preview', methods=['POST'])
 def preview():
     """Generate and return a preview PNG."""
-    data = request.get_json()
-    format_index = data.get('format', 0)
-    text = data.get('text', '')
-    qr_enabled = data.get('qr_enabled', False)
-    qr_content = data.get('qr_content', '')
-
     try:
-        img = render(format_index, text, qr_enabled, qr_content)
+        img = render(**_render_kwargs(request.get_json()))
         buf = io.BytesIO()
         img.save(buf, format='PNG')
         buf.seek(0)
@@ -49,18 +55,14 @@ def get_printers():
 def print_endpoint():
     """Render a label and send it to a CUPS printer."""
     data = request.get_json()
-    format_index = data.get('format', 0)
-    text = data.get('text', '')
-    qr_enabled = data.get('qr_enabled', False)
-    qr_content = data.get('qr_content', '')
     printer_name = data.get('printer_name')
-
     if not printer_name:
         return jsonify({'ok': False, 'message': 'printer_name is required'}), 400
 
     try:
-        img = render(format_index, text, qr_enabled, qr_content)
-        ok, message = print_label(printer_name, img, format_index)
+        kwargs = _render_kwargs(data)
+        img = render(**kwargs)
+        ok, message = print_label(printer_name, img, kwargs['format_index'])
         return jsonify({'ok': ok, 'message': message})
     except Exception as e:
         return jsonify({'ok': False, 'message': str(e)}), 500

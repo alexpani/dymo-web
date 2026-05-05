@@ -124,6 +124,58 @@
   }
   .status.ok { display: block; background: #e8f5e9; color: var(--ok); }
   .status.err { display: block; background: #ffebee; color: var(--err); }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.6rem;
+  }
+  .seg-group {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .seg {
+    background: white;
+    border: none;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.95rem;
+    font-family: inherit;
+    color: var(--text);
+    cursor: pointer;
+    min-width: 2.2rem;
+  }
+  .seg + .seg { border-left: 1px solid var(--border); }
+  .seg.active { background: var(--accent); color: white; }
+  .seg:hover:not(.active) { background: #f0f0f3; }
+  .toggle-btn {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.45rem 0.75rem;
+    font-size: 0.95rem;
+    font-family: inherit;
+    color: var(--text);
+    cursor: pointer;
+    min-width: 2.2rem;
+  }
+  .toggle-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .toggle-btn:hover:not(.active) { background: #f0f0f3; }
+  .size-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.6rem;
+  }
+  .size-row input[type="range"] { flex: 1; }
+  .size-row .size-label {
+    font-size: 0.85rem;
+    color: var(--muted);
+    min-width: 4rem;
+    text-align: right;
+  }
   @media (max-width: 480px) {
     body { padding: 0.5rem; }
     h1 { font-size: 1.2rem; }
@@ -147,6 +199,22 @@
   <div class="card">
     <label for="text">Testo</label>
     <textarea id="text" placeholder="Scrivi qui il testo dell'etichetta..."></textarea>
+
+    <div class="toolbar">
+      <button class="toggle-btn" id="bold_btn" title="Grassetto"><b>B</b></button>
+      <button class="toggle-btn" id="italic_btn" title="Corsivo"><i>I</i></button>
+      <div class="seg-group" id="align_group">
+        <button class="seg" data-align="left" title="Allinea a sinistra">⯇</button>
+        <button class="seg active" data-align="center" title="Centra">≡</button>
+        <button class="seg" data-align="right" title="Allinea a destra">⯈</button>
+      </div>
+    </div>
+
+    <div class="size-row">
+      <label for="font_size" style="margin:0">Dim. font</label>
+      <input type="range" id="font_size" min="0" max="200" step="2" value="0">
+      <span class="size-label" id="font_size_label">Auto</span>
+    </div>
 
     <div class="checkbox-row" style="margin-top: 0.75rem;">
       <input type="checkbox" id="qr_enabled">
@@ -213,12 +281,19 @@ async function loadFormats() {
   });
 }
 
+const state = { bold: false, italic: false, align: 'center' };
+
 function getPayload() {
+  const sliderVal = parseInt($('font_size').value, 10);
   return {
     format: parseInt($('format').value, 10),
     text: $('text').value,
     qr_enabled: $('qr_enabled').checked,
     qr_content: $('qr_content').value,
+    bold: state.bold,
+    italic: state.italic,
+    align: state.align,
+    font_size_pt: sliderVal > 0 ? sliderVal : null,
   };
 }
 
@@ -302,6 +377,31 @@ $('qr_enabled').addEventListener('change', () => {
 });
 $('qr_content').addEventListener('input', schedulePreview);
 $('print_btn').addEventListener('click', doPrint);
+
+$('bold_btn').addEventListener('click', () => {
+  state.bold = !state.bold;
+  $('bold_btn').classList.toggle('active', state.bold);
+  schedulePreview();
+});
+$('italic_btn').addEventListener('click', () => {
+  state.italic = !state.italic;
+  $('italic_btn').classList.toggle('active', state.italic);
+  schedulePreview();
+});
+$('align_group').querySelectorAll('.seg').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.align = btn.dataset.align;
+    $('align_group').querySelectorAll('.seg').forEach(b =>
+      b.classList.toggle('active', b === btn)
+    );
+    schedulePreview();
+  });
+});
+$('font_size').addEventListener('input', () => {
+  const v = parseInt($('font_size').value, 10);
+  $('font_size_label').textContent = v > 0 ? v + ' pt' : 'Auto';
+  schedulePreview();
+});
 
 // Init
 (async () => {
