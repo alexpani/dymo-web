@@ -183,6 +183,44 @@
   .toggle-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
   .toggle-btn:hover:not(.active):not(:disabled) { background: #f0f0f3; }
   .toggle-btn:disabled { opacity: 0.4; cursor: default; }
+  .decor-row { display: flex; align-items: center; }
+  .icon-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    margin-top: 0.5rem;
+    max-height: 12rem;
+    overflow-y: auto;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    min-height: 3rem;
+  }
+  .icon-grid:empty::before {
+    content: 'Digita per cercare…';
+    color: #aaa;
+    font-size: 0.85rem;
+    grid-column: 1 / -1;
+    text-align: center;
+    align-self: center;
+  }
+  .icon-grid button {
+    background: white;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 4px;
+    cursor: pointer;
+    aspect-ratio: 1 / 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .icon-grid button:hover { background: #f0f0f3; }
+  .icon-grid button.selected { border-color: var(--accent); background: #e8f0fe; }
+  .icon-grid img { width: 22px; height: 22px; }
+  @media (max-width: 480px) {
+    .icon-grid { grid-template-columns: repeat(6, 1fr); }
+  }
   .size-row {
     display: flex;
     align-items: center;
@@ -259,16 +297,32 @@
       <button class="toggle-btn" id="font_size_reset" title="Torna ad Auto" disabled>Auto</button>
     </div>
 
-    <div class="checkbox-row" style="margin-top: 0.75rem;">
-      <input type="checkbox" id="qr_enabled">
-      <label for="qr_enabled">Aggiungi QR code</label>
+    <div class="decor-row" style="margin-top: 0.9rem;">
+      <label style="margin: 0 0.5rem 0 0">Decoro</label>
+      <div class="seg-group" id="decor_mode">
+        <button class="seg active" data-decor="none">Nessuno</button>
+        <button class="seg"        data-decor="qr">QR</button>
+        <button class="seg"        data-decor="icon">Icona</button>
+      </div>
     </div>
-    <input type="text" id="qr_content" placeholder="Contenuto del QR (URL, testo...)" disabled>
-    <select id="qr_position" disabled style="margin-top: 0.5rem;">
-      <option value="left" selected>QR a sinistra (testo a destra)</option>
-      <option value="right">QR a destra (testo a sinistra)</option>
-      <option value="top">QR in alto (testo in basso)</option>
-      <option value="bottom">QR in basso (testo in alto)</option>
+
+    <div id="decor_qr" class="decor-pane" hidden style="margin-top: 0.6rem;">
+      <input type="text" id="qr_content" placeholder="Contenuto del QR (URL, testo...)">
+    </div>
+
+    <div id="decor_icon" class="decor-pane" hidden style="margin-top: 0.6rem;">
+      <input type="text" id="icon_search" placeholder="Cerca un'icona (es. 'home', 'wifi'...)">
+      <div id="icon_results" class="icon-grid"></div>
+      <div id="icon_chosen" hidden style="margin-top: 0.4rem; font-size: 0.85rem; color: var(--muted);">
+        <span>Scelta:</span> <strong id="icon_chosen_id"></strong>
+      </div>
+    </div>
+
+    <select id="decor_position" hidden style="margin-top: 0.6rem;">
+      <option value="left" selected>A sinistra (testo a destra)</option>
+      <option value="right">A destra (testo a sinistra)</option>
+      <option value="top">In alto (testo in basso)</option>
+      <option value="bottom">In basso (testo in alto)</option>
     </select>
   </div>
 
@@ -344,7 +398,8 @@ async function loadFormats() {
   if (fmt) selectPrinterFor(fmt.kind || 'label');
 }
 
-const state = { align: 'center' };
+const state = { align: 'center', decor: 'none', icon_id: '' };
+let iconSearchTimer = null;
 
 function extractRuns(root) {
   const runs = [];
@@ -400,9 +455,10 @@ function getPayload() {
   return {
     format: parseInt($('format').value, 10),
     runs: extractRuns($('text')),
-    qr_enabled: $('qr_enabled').checked,
+    decor: state.decor,
     qr_content: $('qr_content').value,
-    qr_position: $('qr_position').value,
+    icon_id: state.icon_id,
+    decor_position: $('decor_position').value,
     align: state.align,
     font_size_pt: sliderVal > 0 ? sliderVal : null,
   };
@@ -501,14 +557,57 @@ $('text').addEventListener('mouseup', syncFormatButtons);
 document.addEventListener('selectionchange', () => {
   if (document.activeElement === $('text')) syncFormatButtons();
 });
-$('qr_enabled').addEventListener('change', () => {
-  const on = $('qr_enabled').checked;
-  $('qr_content').disabled = !on;
-  $('qr_position').disabled = !on;
+function setDecorMode(mode) {
+  state.decor = mode;
+  $('decor_mode').querySelectorAll('.seg').forEach(b =>
+    b.classList.toggle('active', b.dataset.decor === mode)
+  );
+  $('decor_qr').hidden   = mode !== 'qr';
+  $('decor_icon').hidden = mode !== 'icon';
+  $('decor_position').hidden = mode === 'none';
   schedulePreview();
+}
+$('decor_mode').querySelectorAll('.seg').forEach(b => {
+  b.addEventListener('click', () => setDecorMode(b.dataset.decor));
 });
 $('qr_content').addEventListener('input', schedulePreview);
-$('qr_position').addEventListener('change', schedulePreview);
+$('decor_position').addEventListener('change', schedulePreview);
+
+async function searchIcons(q) {
+  const grid = $('icon_results');
+  if (!q || q.length < 2) { grid.innerHTML = ''; return; }
+  try {
+    const res = await fetch('/api/icons/search?q=' + encodeURIComponent(q) + '&limit=32');
+    const data = await res.json();
+    grid.innerHTML = '';
+    (data.icons || []).forEach(id => {
+      const btn = document.createElement('button');
+      btn.title = id;
+      btn.dataset.iconId = id;
+      if (id === state.icon_id) btn.classList.add('selected');
+      const img = document.createElement('img');
+      img.src = 'https://api.iconify.design/' + id + '.svg?color=%23000';
+      img.alt = id;
+      btn.appendChild(img);
+      btn.addEventListener('click', () => {
+        state.icon_id = id;
+        $('icon_chosen_id').textContent = id;
+        $('icon_chosen').hidden = false;
+        grid.querySelectorAll('button').forEach(b =>
+          b.classList.toggle('selected', b.dataset.iconId === id)
+        );
+        schedulePreview();
+      });
+      grid.appendChild(btn);
+    });
+  } catch (e) {
+    grid.innerHTML = '<div style="grid-column:1/-1; color:var(--err); font-size:0.85rem;">Errore ricerca</div>';
+  }
+}
+$('icon_search').addEventListener('input', () => {
+  clearTimeout(iconSearchTimer);
+  iconSearchTimer = setTimeout(() => searchIcons($('icon_search').value.trim()), 300);
+});
 $('print_btn').addEventListener('click', doPrint);
 
 function applyFormat(cmd) {

@@ -1,5 +1,8 @@
+import os
 import platform
 import re
+import urllib.request
+import urllib.parse
 from PIL import Image, ImageDraw, ImageFont
 import qrcode
 
@@ -182,32 +185,38 @@ def _layout(runs, max_width, max_height, font_size_pt=None):
     return best
 
 
-def render(format_index, runs=None, qr_enabled=False, qr_content='',
-           align='center', font_size_pt=None, qr_position='left',
-           text='', bold=False, italic=False):
+def render(format_index, runs=None,
+           decor='none', qr_content='', icon_id='', decor_position='left',
+           align='center', font_size_pt=None,
+           text='', bold=False, italic=False,
+           # legacy aliases (older clients / curl scripts):
+           qr_enabled=False, qr_position=None):
     """
     Render a label as PIL.Image.
 
-    runs:        list of {text, bold, italic}. '\\n' inside text splits paragraphs.
-    text/bold/italic: legacy single-run shortcut, used only if runs is None/empty.
-    align:       'left' | 'center' | 'right' (text alignment within its area)
-    font_size_pt: int forced size, or None for auto-fit.
-    qr_position: 'left' | 'right' | 'top' | 'bottom' — placement of the QR code
-                 relative to the text. Ignored when there's no text (QR is then
-                 centered).
-
-    For 'label' kind: PNG dimensions are fixed by the preset.
-    For 'tape' kind:  PNG height is the tape width; PNG length is auto-fit to
-                       the longest rendered line (clamped to height_mm minimum).
-                       QR is currently not supported on tape.
+    decor:           'none' | 'qr' | 'icon'  (mutually exclusive)
+    qr_content:      text/URL for the QR (used only when decor='qr')
+    icon_id:         Iconify '<set>:<name>' (used only when decor='icon')
+    decor_position:  'left' | 'right' | 'top' | 'bottom' — placement relative
+                     to the text area. Ignored when there's no text (decor
+                     centered on the label).
+    runs:            list of {text, bold, italic}; '\\n' splits paragraphs
+    align:           text alignment within its area
+    font_size_pt:    int forced size, or None for auto-fit
     """
     fmt = FORMATS[format_index]
     if not runs:
         runs = [{'text': text, 'bold': bold, 'italic': italic}]
 
+    # Backward-compat: map old qr_enabled/qr_position to new decor params
+    if decor == 'none' and qr_enabled and qr_content:
+        decor = 'qr'
+    if qr_position and decor_position == 'left':
+        decor_position = qr_position
+
     if fmt.get('kind') == 'tape':
         return _render_tape(fmt, runs, align, font_size_pt)
-    return _render_label(fmt, runs, qr_enabled, qr_content, align, font_size_pt, qr_position)
+    return _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align, font_size_pt)
 
 
 def _make_qr(qr_content, max_size_px):
@@ -219,7 +228,69 @@ def _make_qr(qr_content, max_size_px):
     return img.resize((max_size_px, max_size_px), Image.Resampling.LANCZOS)
 
 
-def _render_label(fmt, runs, qr_enabled, qr_content, align, font_size_pt, qr_position='left'):
+# ── Iconify integration ──────────────────────────────────────────────────────
+ICON_CACHE_DIR = '/tmp/dymo-web-icons'
+ICONIFY_BASE = 'https://api.iconify.design'
+
+
+def _fetch_icon(icon_id, size_px):
+    """
+    Fetch an Iconify icon (or read from cache) and return a black PIL.Image
+    resized to (size_px, size_px). Returns None on any network/parse error.
+
+    Iconify's free API serves SVG only; we render to PNG locally with svglib
+    + reportlab, then cache the rendered PNG.
+    """
+    if not icon_id or ':' not in icon_id:
+        return None
+    set_name, name = icon_id.split(':', 1)
+    safe = re.sub(r'[^a-zA-Z0-9_.-]', '_', f'{set_name}__{name}')
+    os.makedirs(ICON_CACHE_DIR, exist_ok=True)
+    cache_path = os.path.join(ICON_CACHE_DIR, f'{safe}.png')
+
+    if not os.path.exists(cache_path):
+        url = f'{ICONIFY_BASE}/{urllib.parse.quote(set_name)}:{urllib.parse.quote(name)}.svg?color=%23000'
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'dymo-web/1.0'})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                svg_bytes = r.read()
+            # Convert SVG -> PNG @ 600px (cache once, resize on demand)
+            import io as _io
+            from svglib.svglib import svg2rlg
+            from reportlab.graphics import renderPM
+            drawing = svg2rlg(_io.BytesIO(svg_bytes))
+            target = 600
+            scale = target / max(drawing.width or target, drawing.height or target)
+            drawing.width = drawing.minWidth() * scale
+            drawing.height = drawing.height * scale
+            drawing.scale(scale, scale)
+            renderPM.drawToFile(drawing, cache_path, fmt='PNG')
+        except Exception:
+            return None
+
+    try:
+        icon = Image.open(cache_path).convert('RGBA')
+    except Exception:
+        return None
+    return icon.resize((size_px, size_px), Image.Resampling.LANCZOS)
+
+
+def _paste_icon(canvas, icon_rgba, position):
+    """Paste an RGBA icon onto a white canvas, preserving transparency."""
+    x, y = position
+    canvas.paste(icon_rgba, (x, y), icon_rgba)
+
+
+def _build_decor(decor, qr_content, icon_id, size_px):
+    """Return RGB or RGBA PIL.Image for the chosen decor (QR or icon), or None."""
+    if decor == 'qr' and qr_content:
+        return _make_qr(qr_content, size_px)
+    if decor == 'icon' and icon_id:
+        return _fetch_icon(icon_id, size_px)
+    return None
+
+
+def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align, font_size_pt):
     width_px = mm_to_px(fmt['width_mm'])
     height_px = mm_to_px(fmt['height_mm'])
     pad = mm_to_px(2)
@@ -228,46 +299,54 @@ def _render_label(fmt, runs, qr_enabled, qr_content, align, font_size_pt, qr_pos
     draw = ImageDraw.Draw(img)
 
     has_text = any(r.get('text') for r in runs)
-    has_qr = bool(qr_enabled and qr_content)
+    has_decor = decor in ('qr', 'icon') and (
+        (decor == 'qr' and qr_content) or (decor == 'icon' and icon_id)
+    )
 
-    # QR sizing depends on layout
-    if has_qr and not has_text:
-        # Centered QR: as big as the shorter side allows, leaving padding
-        qr_size = min(width_px, height_px) - 2 * pad
-        qr_img = _make_qr(qr_content, max(20, qr_size))
-        qx = (width_px - qr_img.size[0]) // 2
-        qy = (height_px - qr_img.size[1]) // 2
-        img.paste(qr_img, (qx, qy))
+    if has_decor and not has_text:
+        # Centered: as big as the shorter side allows, leaving padding
+        size = max(20, min(width_px, height_px) - 2 * pad)
+        d_img = _build_decor(decor, qr_content, icon_id, size)
+        if d_img is not None:
+            dx = (width_px - d_img.size[0]) // 2
+            dy = (height_px - d_img.size[1]) // 2
+            if d_img.mode == 'RGBA':
+                _paste_icon(img, d_img, (dx, dy))
+            else:
+                img.paste(d_img, (dx, dy))
         return img
 
-    qr_img = None
     text_x, text_y = pad, pad
     text_w = width_px - 2 * pad
     text_h = height_px - 2 * pad
 
-    if has_qr:
-        if qr_position in ('left', 'right'):
-            qr_size = min(height_px - 2 * pad, width_px // 3)
+    if has_decor:
+        if decor_position in ('left', 'right'):
+            d_size = max(20, min(height_px - 2 * pad, width_px // 3))
         else:  # top, bottom
-            qr_size = min(width_px - 2 * pad, height_px // 3)
-        qr_size = max(20, qr_size)
-        qr_img = _make_qr(qr_content, qr_size)
+            d_size = max(20, min(width_px - 2 * pad, height_px // 3))
+        d_img = _build_decor(decor, qr_content, icon_id, d_size)
 
-        if qr_position == 'left':
-            qx, qy = pad, (height_px - qr_img.size[1]) // 2
-            text_x = qx + qr_img.size[0] + pad
-            text_w = width_px - text_x - pad
-        elif qr_position == 'right':
-            qx, qy = width_px - qr_img.size[0] - pad, (height_px - qr_img.size[1]) // 2
-            text_w = qx - 2 * pad
-        elif qr_position == 'top':
-            qx, qy = (width_px - qr_img.size[0]) // 2, pad
-            text_y = qy + qr_img.size[1] + pad
-            text_h = height_px - text_y - pad
-        else:  # bottom
-            qx, qy = (width_px - qr_img.size[0]) // 2, height_px - qr_img.size[1] - pad
-            text_h = qy - 2 * pad
-        img.paste(qr_img, (qx, qy))
+        if d_img is not None:
+            dw, dh = d_img.size
+            if decor_position == 'left':
+                dx, dy = pad, (height_px - dh) // 2
+                text_x = dx + dw + pad
+                text_w = width_px - text_x - pad
+            elif decor_position == 'right':
+                dx, dy = width_px - dw - pad, (height_px - dh) // 2
+                text_w = dx - 2 * pad
+            elif decor_position == 'top':
+                dx, dy = (width_px - dw) // 2, pad
+                text_y = dy + dh + pad
+                text_h = height_px - text_y - pad
+            else:  # bottom
+                dx, dy = (width_px - dw) // 2, height_px - dh - pad
+                text_h = dy - 2 * pad
+            if d_img.mode == 'RGBA':
+                _paste_icon(img, d_img, (dx, dy))
+            else:
+                img.paste(d_img, (dx, dy))
 
     if has_text and text_w > 10 and text_h > 10:
         size, lines, line_h = _layout(runs, text_w, text_h, font_size_pt)

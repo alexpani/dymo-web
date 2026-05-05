@@ -3,3 +3,5 @@ waitress>=3.0
 Pillow>=11.0
 qrcode[pil]>=7.4
 python-dotenv>=1.0
+svglib>=1.5
+reportlab>=4.0

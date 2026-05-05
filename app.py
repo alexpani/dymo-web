@@ -1,5 +1,8 @@
 import os
 import io
+import json
+import urllib.request
+import urllib.parse
 from flask import Flask, jsonify, request, send_from_directory
 from waitress import serve
 from dotenv import load_dotenv
@@ -29,9 +32,13 @@ def _render_kwargs(data):
         'format_index': data.get('format', 0),
         'runs': data.get('runs'),
         'text': data.get('text', ''),
-        'qr_enabled': data.get('qr_enabled', False),
+        'decor': data.get('decor', 'none'),
         'qr_content': data.get('qr_content', ''),
-        'qr_position': data.get('qr_position', 'left'),
+        'icon_id': data.get('icon_id', ''),
+        'decor_position': data.get('decor_position', 'left'),
+        # legacy (older clients)
+        'qr_enabled': data.get('qr_enabled', False),
+        'qr_position': data.get('qr_position'),
         'bold': data.get('bold', False),
         'italic': data.get('italic', False),
         'align': data.get('align', 'center'),
@@ -70,6 +77,24 @@ def print_endpoint():
         return jsonify({'ok': ok, 'message': message})
     except Exception as e:
         return jsonify({'ok': False, 'message': str(e)}), 500
+
+@app.route('/api/icons/search')
+def icons_search():
+    """Proxy to https://api.iconify.design/search — keeps icon discovery
+    server-side (consistent retries, easier to swap library later)."""
+    q = (request.args.get('q') or '').strip()
+    if not q:
+        return jsonify({'icons': []})
+    limit = min(int(request.args.get('limit', 24)), 96)
+    url = f'https://api.iconify.design/search?query={urllib.parse.quote(q)}&limit={limit}'
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'dymo-web/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = json.loads(r.read().decode())
+        return jsonify({'icons': data.get('icons', [])})
+    except Exception as e:
+        return jsonify({'icons': [], 'error': str(e)}), 502
+
 
 if __name__ == '__main__':
     print(f'Starting server on port {port}...')
