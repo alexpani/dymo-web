@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from label_render import FORMATS, render, resolve_cups_media
 from printing import list_printers, print_label
 import presets_store
+import history
 
 load_dotenv()
 
@@ -91,6 +92,15 @@ def print_endpoint():
         kwargs = _render_kwargs(data, for_print=True)
         img = render(**kwargs)
         ok, message = print_label(printer_name, img, kwargs['format_index'])
+        if ok:
+            try:
+                fmt = FORMATS[kwargs['format_index']]
+                meta = {'index': kwargs['format_index'], **fmt}
+                # Don't store the printer_name in the history (it changes per host)
+                payload = {k: v for k, v in data.items() if k != 'printer_name'}
+                history.add(payload, meta, img)
+            except Exception:
+                pass  # history failure shouldn't fail the print
         return jsonify({'ok': ok, 'message': message})
     except Exception as e:
         return jsonify({'ok': False, 'message': str(e)}), 500
@@ -124,6 +134,37 @@ def api_overrides_delete(name):
         return jsonify(presets_store.reset(name))
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+
+@app.route('/history')
+def history_page():
+    return send_from_directory('static', 'history.html')
+
+
+@app.route('/api/history')
+def api_history_list():
+    limit  = min(int(request.args.get('limit', 5)), 50)
+    offset = max(int(request.args.get('offset', 0)), 0)
+    kind   = request.args.get('kind') or None
+    if kind not in (None, 'label', 'tape'):
+        kind = None
+    return jsonify({
+        'items': history.list_(limit=limit, offset=offset, kind=kind),
+        'total': history.total(),
+    })
+
+
+@app.route('/api/history/<entry_id>', methods=['GET'])
+def api_history_get(entry_id):
+    item = history.get(entry_id)
+    if not item:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify(item)
+
+
+@app.route('/api/history/<entry_id>', methods=['DELETE'])
+def api_history_delete(entry_id):
+    return jsonify({'deleted': history.delete(entry_id)})
 
 
 @app.route('/api/icons/search')

@@ -24,9 +24,75 @@
     color: var(--text);
     padding: 1rem;
   }
-  .container {
-    max-width: 720px;
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 720px) 220px;
+    gap: 1rem;
+    max-width: 960px;
     margin: 0 auto;
+  }
+  .container { min-width: 0; }
+  .history-sidebar {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.75rem;
+    align-self: start;
+    position: sticky;
+    top: 1rem;
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+  }
+  .history-sidebar h2 {
+    margin: 0 0 0.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .history-thumbs { display: flex; flex-direction: column; gap: 0.5rem; }
+  .thumb {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: white;
+    padding: 4px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .thumb:hover { border-color: var(--accent); }
+  .thumb img { display: block; width: 100%; height: auto; max-height: 80px; object-fit: contain; }
+  .thumb-meta { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+  .thumb-x {
+    position: absolute; top: 2px; right: 2px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: rgba(255,255,255,0.95);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    display: none;
+    line-height: 18px; text-align: center;
+    color: var(--err); font-weight: bold; font-size: 14px;
+    padding: 0;
+  }
+  .thumb:hover .thumb-x { display: block; }
+  .see-all {
+    display: block; margin-top: 0.5rem;
+    color: var(--accent); text-decoration: none;
+    font-size: 0.85rem; text-align: center;
+  }
+  .history-empty {
+    color: var(--muted); font-size: 0.85rem;
+    padding: 1rem 0; text-align: center;
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; max-width: 720px; }
+    .history-sidebar { position: static; max-height: none; }
+    .history-thumbs {
+      flex-direction: row;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .thumb { flex: 0 0 120px; }
   }
   h1 {
     font-size: 1.4rem;
@@ -44,6 +110,15 @@
     border-radius: 6px;
   }
   .settings-link:hover { background: #ececef; color: var(--text); }
+  .header-tools { display: flex; align-items: center; gap: 0.5rem; }
+  .printer-dot {
+    width: 0.7rem; height: 0.7rem; border-radius: 50%;
+    background: #999;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.05);
+    transition: background 0.3s;
+  }
+  .printer-dot.online  { background: #2e7d32; }
+  .printer-dot.offline { background: #c62828; }
   .card {
     background: var(--card);
     border: 1px solid var(--border);
@@ -253,10 +328,14 @@
 </style>
 </head>
 <body>
+<div class="layout">
 <div class="container">
   <h1>
     <span>🏷️ DYMO Label</span>
-    <a href="/presets" class="settings-link" title="Gestione preset" aria-label="Gestione preset">⚙</a>
+    <span class="header-tools">
+      <span id="printer_dot" class="printer-dot" title="Stato stampante" aria-label="Stato stampante"></span>
+      <a href="/presets" class="settings-link" title="Gestione preset" aria-label="Gestione preset">⚙</a>
+    </span>
   </h1>
 
   <div class="card" id="printer_card">
@@ -355,14 +434,27 @@
   </div>
 </div>
 
+<aside class="history-sidebar" id="history_sidebar">
+  <h2>Recenti</h2>
+  <div class="history-thumbs" id="history_thumbs"></div>
+  <a href="/history" class="see-all">Vedi tutto →</a>
+</aside>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 let formats = [];
 let debounceTimer = null;
 
 async function loadPrinters() {
-  const res = await fetch('/api/printers');
-  const printers = await res.json();
+  let printers = [];
+  try {
+    const res = await fetch('/api/printers');
+    printers = await res.json();
+  } catch (e) {
+    printers = [];
+  }
+  updatePrinterDot(printers);
   const sel = $('printer');
   sel.innerHTML = '';
   if (printers.length === 0) {
@@ -385,6 +477,30 @@ async function loadPrinters() {
   $('printer_card').style.display =
     (printers.length >= 1 && printers.length <= 2) ? 'none' : '';
 }
+
+function updatePrinterDot(printers) {
+  const dot = $('printer_dot');
+  if (!dot) return;
+  const dymoCount = printers.filter(p => /dymo/i.test(p.name)).length;
+  if (dymoCount > 0) {
+    dot.classList.add('online');
+    dot.classList.remove('offline');
+    dot.title = `${dymoCount} stampante DYMO online`;
+  } else {
+    dot.classList.add('offline');
+    dot.classList.remove('online');
+    dot.title = 'Nessuna stampante DYMO rilevata';
+  }
+}
+
+// Refresh printer status periodically (silent — no full UI re-render)
+async function refreshPrinterStatus() {
+  try {
+    const res = await fetch('/api/printers');
+    updatePrinterDot(await res.json());
+  } catch (e) { updatePrinterDot([]); }
+}
+setInterval(refreshPrinterStatus, 30000);
 
 function selectPrinterFor(kind) {
   const sel = $('printer');
@@ -489,10 +605,9 @@ function syncFormatButtons() {
 async function updatePreview() {
   const payload = getPayload();
   const fmt = formats[payload.format];
-  const media = fmt.cups_media || 'Custom.' + fmt.width_mm + 'x' + fmt.height_mm + 'mm';
   $('preview_meta').textContent = fmt.kind === 'tape'
-    ? `Nastro ${fmt.width_mm} mm — lunghezza auto-fit — ${media}`
-    : `${fmt.width_mm} × ${fmt.height_mm} mm — ${media}`;
+    ? `Nastro ${fmt.width_mm} mm — auto-fit — ${fmt.code}`
+    : `${fmt.width_mm} × ${fmt.height_mm} mm — ${fmt.code}`;
 
   try {
     const res = await fetch('/api/preview', {
@@ -545,19 +660,20 @@ async function doPrint() {
     });
     const data = await res.json();
     if (data.ok) {
-      status.className = 'status ok';
-      status.textContent = data.message || 'Job inviato a CUPS.';
-    } else {
-      status.className = 'status err';
-      status.textContent = data.message || 'Errore di stampa.';
+      // Brief visual confirmation on the button itself, no status message
+      btn.textContent = 'Stampa ✓';
+      setTimeout(() => { btn.disabled = false; btn.textContent = 'Stampa'; }, 1800);
+      loadHistory();
+      return;
     }
+    status.className = 'status err';
+    status.textContent = data.message || 'Errore di stampa.';
   } catch (e) {
     status.className = 'status err';
     status.textContent = 'Errore di rete: ' + e.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Stampa';
   }
+  btn.disabled = false;
+  btn.textContent = 'Stampa';
 }
 
 // Wire up events
@@ -659,11 +775,107 @@ $('font_size_reset').addEventListener('click', () => {
   schedulePreview();
 });
 
+// ── History ──────────────────────────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function runsToHtml(runs) {
+  if (!runs) return '';
+  return runs.map(r => {
+    let html = escapeHtml(r.text || '').replace(/\n/g, '<br>');
+    if (r.bold)   html = '<b>' + html + '</b>';
+    if (r.italic) html = '<i>' + html + '</i>';
+    return html;
+  }).join('');
+}
+
+function applyPayload(payload) {
+  if (typeof payload.format === 'number') {
+    $('format').value = payload.format;
+    const fmt = formats[payload.format];
+    if (fmt) selectPrinterFor(fmt.kind || 'label');
+  }
+  $('text').innerHTML = runsToHtml(payload.runs);
+  setDecorMode(payload.decor || 'none');
+  $('qr_content').value = payload.qr_content || '';
+  $('decor_position').value = payload.decor_position || 'left';
+  state.icon_id = payload.icon_id || '';
+  if (state.icon_id) {
+    $('icon_chosen_id').textContent = state.icon_id;
+    $('icon_chosen').hidden = false;
+  } else {
+    $('icon_chosen').hidden = true;
+  }
+  state.align = payload.align || 'center';
+  $('align_group').querySelectorAll('.seg').forEach(b =>
+    b.classList.toggle('active', b.dataset.align === state.align));
+  const sz = payload.font_size_pt || 0;
+  $('font_size').value = sz;
+  syncFontSizeUI();
+  updatePreview();
+}
+
+async function loadHistory() {
+  try {
+    const res = await fetch('/api/history?limit=5');
+    const data = await res.json();
+    renderHistory(data.items || []);
+  } catch (e) {
+    renderHistory([]);
+  }
+}
+
+function renderHistory(items) {
+  const root = $('history_thumbs');
+  root.innerHTML = '';
+  if (!items.length) {
+    root.innerHTML = '<div class="history-empty">Niente da mostrare ancora.</div>';
+    return;
+  }
+  items.forEach(it => {
+    const div = document.createElement('div');
+    div.className = 'thumb';
+    div.title = (it.format_name || '') + ' — ' + new Date(it.ts * 1000).toLocaleString();
+    div.innerHTML = `
+      <img src="data:image/png;base64,${it.thumb_b64}" alt="">
+      <div class="thumb-meta">${escapeHtml(it.format_code || '')}</div>
+      <button class="thumb-x" title="Rimuovi" aria-label="Rimuovi">×</button>
+    `;
+    div.addEventListener('click', e => {
+      if (e.target.classList.contains('thumb-x')) return;
+      applyPayload(it.payload);
+    });
+    div.querySelector('.thumb-x').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await fetch('/api/history/' + encodeURIComponent(it.id), {method: 'DELETE'});
+      loadHistory();
+    });
+    root.appendChild(div);
+  });
+}
+
 // Init
 (async () => {
   await Promise.all([loadPrinters(), loadFormats()]);
+  // Replay from /history page (?id stored in sessionStorage)
+  const replayId = sessionStorage.getItem('replay_id');
+  if (replayId) {
+    sessionStorage.removeItem('replay_id');
+    try {
+      const res = await fetch('/api/history/' + encodeURIComponent(replayId));
+      if (res.ok) {
+        const item = await res.json();
+        applyPayload(item.payload);
+        loadHistory();
+        return;
+      }
+    } catch (e) {}
+  }
   $('text').textContent = 'Test';
   updatePreview();
+  loadHistory();
 })();
 </script>
 </body>

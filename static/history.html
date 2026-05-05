@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cronologia stampe — DYMO Label</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #fff; --border: #d2d2d7;
+    --text: #1d1d1f; --muted: #6e6e73;
+    --accent: #0071e3; --accent-hover: #0077ed;
+    --err: #c62828;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1rem;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text);
+  }
+  .container { max-width: 960px; margin: 0 auto; }
+  h1 {
+    font-size: 1.4rem; margin: 0 0 1rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .back-link { color: var(--accent); text-decoration: none; font-size: 1rem; font-weight: 500; }
+
+  .toolbar {
+    display: flex; gap: 0.5rem; align-items: center;
+    margin-bottom: 1rem; flex-wrap: wrap;
+  }
+  .toolbar label { font-size: 0.85rem; color: var(--muted); }
+  .toolbar select {
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.95rem; font-family: inherit; background: white;
+  }
+  .meta { color: var(--muted); font-size: 0.85rem; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.75rem;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0.6rem;
+    position: relative; cursor: pointer;
+    transition: border-color 0.15s, transform 0.1s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card:active { transform: scale(0.98); }
+  .card img {
+    display: block; width: 100%; height: auto;
+    max-height: 120px; object-fit: contain;
+    background: white;
+  }
+  .card-meta {
+    margin-top: 0.4rem; font-size: 0.75rem; color: var(--muted);
+    display: flex; justify-content: space-between; gap: 0.5rem;
+  }
+  .card-code { font-weight: 500; color: var(--text); }
+  .card-x {
+    position: absolute; top: 4px; right: 4px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(255,255,255,0.95);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    display: none;
+    line-height: 18px; text-align: center;
+    color: var(--err); font-weight: bold;
+    padding: 0;
+  }
+  .card:hover .card-x { display: block; }
+
+  .pager { display: flex; justify-content: center; gap: 0.5rem; margin-top: 1rem; }
+  .pager button {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: white; cursor: pointer; font-size: 0.95rem;
+  }
+  .pager button:disabled { opacity: 0.4; cursor: default; }
+
+  .empty {
+    color: var(--muted); text-align: center;
+    padding: 3rem 0; font-size: 0.95rem;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>
+    <a href="/" class="back-link" title="Torna alla home">←</a>
+    Cronologia
+  </h1>
+
+  <div class="toolbar">
+    <label for="filter_kind">Filtra:</label>
+    <select id="filter_kind">
+      <option value="">Tutto</option>
+      <option value="label">Solo etichette</option>
+      <option value="tape">Solo nastri</option>
+    </select>
+    <span class="meta" id="counter"></span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="pager">
+    <button id="prev_btn">← Precedenti</button>
+    <button id="next_btn">Successivi →</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const PAGE_SIZE = 10;
+let offset = 0;
+let kind = '';
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function load() {
+  const params = new URLSearchParams({ limit: PAGE_SIZE, offset, ...(kind ? {kind} : {}) });
+  const res = await fetch('/api/history?' + params);
+  const data = await res.json();
+  render(data);
+}
+
+function render(data) {
+  const grid = $('grid');
+  grid.innerHTML = '';
+  if (!data.items.length) {
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1">${
+      offset === 0 ? 'Nessuna stampa registrata.' : 'Nessuna stampa in questa pagina.'
+    }</div>`;
+  } else {
+    data.items.forEach(it => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.title = (it.format_name || '') + ' — ' + new Date(it.ts * 1000).toLocaleString();
+      card.innerHTML = `
+        <img src="data:image/png;base64,${it.thumb_b64}" alt="">
+        <div class="card-meta">
+          <span class="card-code">${escapeHtml(it.format_code || '')}</span>
+          <span>${formatDate(it.ts)}</span>
+        </div>
+        <button class="card-x" title="Rimuovi" aria-label="Rimuovi">×</button>
+      `;
+      card.addEventListener('click', e => {
+        if (e.target.classList.contains('card-x')) return;
+        // Carica nella home: salviamo l'id, l'home la legge da localStorage
+        sessionStorage.setItem('replay_id', it.id);
+        window.location.href = '/';
+      });
+      card.querySelector('.card-x').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await fetch('/api/history/' + encodeURIComponent(it.id), {method: 'DELETE'});
+        load();
+      });
+      grid.appendChild(card);
+    });
+  }
+  $('counter').textContent =
+    data.total === 0 ? '' :
+    `${offset + 1}–${Math.min(offset + data.items.length, data.total)} di ${data.total}`;
+  $('prev_btn').disabled = offset === 0;
+  $('next_btn').disabled = offset + PAGE_SIZE >= data.total;
+}
+
+function formatDate(ts) {
+  const d = new Date(ts * 1000);
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) {
+    return d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  }
+  return d.toLocaleDateString();
+}
+
+$('filter_kind').addEventListener('change', () => {
+  kind = $('filter_kind').value;
+  offset = 0;
+  load();
+});
+$('prev_btn').addEventListener('click', () => { offset = Math.max(0, offset - PAGE_SIZE); load(); });
+$('next_btn').addEventListener('click', () => { offset += PAGE_SIZE; load(); });
+
+load();
+</script>
+</body>
+</html>

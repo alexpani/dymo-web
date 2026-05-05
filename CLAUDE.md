@@ -45,8 +45,17 @@ presets_store.py    JSON store ~/.config/dymo-web/preset_overrides.json (writabl
                     DEFAULTS define the values used when no override exists.
                     Server-side authoritative: app._render_kwargs() applies
                     overrides automatically; clients never pass them.
+history.py          Print history ring buffer (~/.config/dymo-web/history.json).
+                    Cap HISTORY_MAX=200, FIFO. Each entry stores the full
+                    request payload + a base64 PNG thumbnail (long side
+                    scaled to THUMB_LONG_SIDE=200 px). Hooked from /api/print
+                    on success only; failure to add() is swallowed (history
+                    must never block a print).
 static/presets.html Pagina /presets: lista preset, click per espandere form
                     di override (offset, safety, padding) con Salva/Reset.
+static/history.html Pagina /history: griglia paginata 10/pagina, filtro
+                    tipo (label/tape), click su una card → sessionStorage
+                    'replay_id' + redirect a / per ricaricare il payload.
 scripts/update-deps.sh  Aggiorna pacchetti Pi quando cambiano le dependencies
                         (apt install libcairo2 + pip install -r requirements.txt
                         + restart). Da lanciare a mano dopo che le deps cambiano.

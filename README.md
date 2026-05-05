@@ -26,6 +26,15 @@ stessa rete Wi-Fi e stampa.
   puoi regolare offset stampa X/Y in mm (compensazione meccanica — applicato
   solo alla stampa, l'anteprima resta nominale), margine auto-fit del font, e
   padding interno. Override salvati in `~/.config/dymo-web/preset_overrides.json`.
+- **Cronologia stampe**: sidebar in home con le ultime 5 (su mobile diventa
+  barra orizzontale). Click su una miniatura ricarica testo, formato e decoro
+  pronti da ristampare/modificare; hover mostra una × per rimuoverla. Pagina
+  `/history` con filtri (tipo) e paginazione 10 alla volta. Cap 200 entries
+  in `~/.config/dymo-web/history.json`.
+- **Stato stampante** (pallino accanto all'ingranaggio): verde = DYMO online,
+  rosso = nessuna DYMO trovata. Refresh ogni 30s.
+- **Conferma stampa**: il bottone "Stampa" mostra brevemente "✓" al successo,
+  niente messaggi tecnici a schermo.
 - **Anteprima live** con debounce 300 ms.
 
 ## Setup
