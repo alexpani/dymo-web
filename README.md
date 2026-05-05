@@ -1,7 +1,24 @@
 # DYMO Label Web App
 
-Web app personale per stampare etichette su una **DYMO LabelWriter** collegata via USB
-al Mac. Server Flask + frontend HTML/JS vanilla, stampa via CUPS (`lp`).
+Web app personale per stampare etichette su una **DYMO LabelWriter Duo** collegata
+via USB al Mac. Server Flask locale, frontend HTML/JS vanilla, stampa via CUPS (`lp`).
+
+Pensata per uso casalingo / piccolo ufficio: aprila dal Mac o dall'iPhone sulla
+stessa rete Wi-Fi e stampa.
+
+## Funzionalità
+
+- **Editor rich text** (contenteditable nativo): seleziona una parte del testo e
+  applica grassetto / corsivo solo a quella.
+- **4 preset etichette adesive** (89×36, 89×28, 57×32, 32×57 mm) e
+  **4 preset nastro D1** (9, 12, 19, 24 mm).
+- **Auto-selezione stampante** in base al tipo di preset (slot Label vs slot Tape).
+- **Auto-fit del font** (binary search sulla dimensione massima che entra), con
+  override manuale tramite slider e pulsante "Auto" per tornare indietro.
+- **Auto-fit della lunghezza** sui nastri (come fa la app DYMO ufficiale).
+- **Allineamento** sinistra / centro / destra.
+- **QR code opzionale** a sinistra del testo.
+- **Anteprima live** con debounce 300 ms.
 
 ## Setup
 
@@ -25,30 +42,45 @@ sulla stessa rete.
 
 ## Preset etichette
 
-| Preset                       | Codice | Media CUPS              |
-| ---------------------------- | ------ | ----------------------- |
-| 89 × 36 mm Address           | 99012  | `w101h252`              |
-| 89 × 28 mm Address Small     | 99010  | `w81h252`               |
-| 57 × 32 mm Multipurpose      | 11354  | `w162h90`               |
-| 32 × 57 mm Multipurpose vert | 11354  | `w162h90`               |
-| Nastro 9 mm  (auto-fit)      | D1-9   | `Custom.9xLENGTHmm`     |
-| Nastro 12 mm (auto-fit)      | D1-12  | `Custom.12xLENGTHmm`    |
-| Nastro 19 mm (auto-fit)      | D1-19  | `Custom.19xLENGTHmm`    |
-| Nastro 24 mm (auto-fit)      | D1-24  | `Custom.24xLENGTHmm`    |
+| Preset                       | Codice | Media CUPS              | Stampante  |
+| ---------------------------- | ------ | ----------------------- | ---------- |
+| 89 × 36 mm Address           | 99012  | `w101h252`              | `_Label`   |
+| 89 × 28 mm Address Small     | 99010  | `w81h252`               | `_Label`   |
+| 57 × 32 mm Multipurpose      | 11354  | `w162h90`               | `_Label`   |
+| 32 × 57 mm Multipurpose vert | 11354  | `w162h90`               | `_Label`   |
+| Nastro 9 mm  (auto-fit)      | D1-9   | `Custom.9xLENGTHmm`     | `_Tape`    |
+| Nastro 12 mm (auto-fit)      | D1-12  | `Custom.12xLENGTHmm`    | `_Tape`    |
+| Nastro 19 mm (auto-fit)      | D1-19  | `Custom.19xLENGTHmm`    | `_Tape`    |
+| Nastro 24 mm (auto-fit)      | D1-24  | `Custom.24xLENGTHmm`    | `_Tape`    |
 
-I preset Tape (`kind: 'tape'`) hanno **lunghezza variabile**: il PNG viene
-ruotato in portrait e la lunghezza è calcolata dal contenuto. La stampante
-Tape viene autoselezionata quando scegli un preset Nastro.
+I preset Tape (`kind: 'tape'`) hanno **lunghezza variabile**: il PNG viene ruotato
+in portrait e la lunghezza è calcolata dal contenuto.
 
-Per aggiungere un preset: edita la lista `FORMATS` in `label_render.py`. Il campo
-`cups_media` deve essere uno dei nomi esposti da:
+Per aggiungere un preset: edita `FORMATS` in `label_render.py`. Per i preset Label,
+`cups_media` deve essere uno dei nomi nel PPD:
 
 ```bash
 lpoptions -p DYMO_LabelWriter_DUO_Label -l   # cerca "PageSize"
 ```
 
-Se la dimensione non è nel listato, puoi mettere `cups_media: None` e il backend
-userà `Custom.WxHmm` come fallback (può funzionare o no a seconda del driver).
+Se non c'è, lascia `cups_media: None` e il backend userà `Custom.WxHmm`.
+
+## Stack
+
+- **Backend**: Python 3.12 + Flask + waitress
+- **Rendering**: Pillow (300 DPI), `qrcode[pil]`
+- **Stampa**: subprocess su `lp` di CUPS
+- **Frontend**: HTML + CSS + JS vanilla in `static/index.html`, no framework, no build
+- **Persistenza**: nessuna
+
+## Dipendenza dai driver DYMO
+
+Questa app delega tutta la comunicazione USB a CUPS, che a sua volta usa i driver
+DYMO ufficiali (`/Library/Printers/DYMO/`). Quei driver sono **x86_64-only** e
+DYMO ne sconsiglia l'uso sulle prossime versioni di macOS Apple Silicon.
+
+Per il momento funziona; quando si romperà bisognerà passare alla comunicazione
+USB diretta (libusb / pyusb / `labelle`). Vedi `CLAUDE.md` per le opzioni.
 
 ## Troubleshooting
 
@@ -56,9 +88,8 @@ userà `Custom.WxHmm` come fallback (può funzionare o no a seconda del driver).
 
 - Verifica che la DYMO sia collegata: `system_profiler SPUSBDataType | grep -i dymo`
 - Aggiungila in *Impostazioni di Sistema → Stampanti e Scanner → +*
-- La LabelWriter Duo appare come **due** code: `..._Label` (etichette adesive)
-  e `..._Tape` (nastro D1). Servono entrambe se vuoi usare entrambi gli slot;
-  questa app usa solo `_Label`.
+- La LabelWriter Duo appare come **due** code distinte: `..._Label` (adesive) e
+  `..._Tape` (nastro D1). Aggiungile entrambe se vuoi usare entrambi gli slot.
 
 ### CUPS error: `UsbPrinterClassDriver.bundle non disponibile`
 
@@ -87,14 +118,12 @@ cupsenable DYMO_LabelWriter_DUO_Tape_128
 lpadmin -p DYMO_LabelWriter_DUO_Tape_128 -o printer-error-policy=retry-current-job
 ```
 
-Il secondo comando configura CUPS a riprovare invece di disabilitare la
-stampante al primo errore (persistente in `/etc/cups/printers.conf`).
+Il secondo comando configura CUPS a riprovare invece di disabilitare la stampante
+al primo errore (persistente in `/etc/cups/printers.conf`).
 
-## Stack
+### Pagina vuota / contenuto strano nel browser
 
-- **Backend**: Python 3.12 + Flask + waitress
-- **Stampa**: subprocess su `lp` di CUPS
-- **Rendering**: Pillow (300 DPI), `qrcode[pil]`
-- **Frontend**: HTML + CSS + JS vanilla in `static/index.html`, no framework, no build
-
-Nessuna persistenza, nessun DB, nessuno stato.
+Se hai mai installato un'altra app web su `localhost:5050` (tipo "Labelle Web"),
+il suo Service Worker potrebbe intercettare le richieste e servire la versione
+cached. In DevTools → Application → Service Workers → Unregister, e svuota la
+cache.
