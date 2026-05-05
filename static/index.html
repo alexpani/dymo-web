@@ -31,7 +31,19 @@
   h1 {
     font-size: 1.4rem;
     margin: 0 0 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
+  .settings-link {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 1.4rem;
+    line-height: 1;
+    padding: 0.2rem 0.4rem;
+    border-radius: 6px;
+  }
+  .settings-link:hover { background: #ececef; color: var(--text); }
   .card {
     background: var(--card);
     border: 1px solid var(--border);
@@ -242,7 +254,10 @@
 </head>
 <body>
 <div class="container">
-  <h1>🏷️ DYMO Label</h1>
+  <h1>
+    <span>🏷️ DYMO Label</span>
+    <a href="/settings" class="settings-link" title="Impostazioni" aria-label="Impostazioni">⚙</a>
+  </h1>
 
   <div class="card" id="printer_card">
     <label for="printer">Stampante</label>

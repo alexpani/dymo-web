@@ -38,6 +38,15 @@ printing.py         Due path stampa con auto-select:
                     - CUPS lp (macOS dev/staging): subprocess `lp` come fallback.
                     list_printers() advertise i 2 device direct in modalità Linux
                     o parsa lpstat (Mac).
+settings.py         Persistenza JSON (mac: ~/.config/dymo-web, linux: /etc/dymo-web).
+                    Server-side authoritative: render() legge i valori al momento.
+                    v1: solo auto_fit_safety (0..0.5).
+static/settings.html Pagina /settings con slider per auto_fit_safety.
+                    Predisposta per nuove opzioni: aggiungi key in DEFAULTS,
+                    nuovo campo HTML, leggi/scrivi in PUT/GET via /api/settings.
+scripts/update-deps.sh  Aggiorna pacchetti Pi quando cambiano le dependencies
+                        (apt install libcairo2 + pip install -r requirements.txt
+                        + restart). Da lanciare a mano dopo che le deps cambiano.
 static/index.html   Tutto il frontend in un solo file (HTML+CSS+JS).
                     contenteditable per il rich text, B/I via execCommand.
 .claude/launch.json Config per il preview server di Claude Code.
@@ -124,6 +133,17 @@ Se l'utente ha mai installato altre app su `localhost:5050` (l'utente aveva
 "Labelle Web"), il SW intercetta tutto e mostra contenuto vecchio. Sintomo:
 "pagina vuota" o app sbagliata anche se il server Flask risponde corretto a
 curl. Fix: unregister SW + clear cache da DevTools.
+
+### Iconify free API: solo SVG (no PNG endpoint pubblico)
+- `https://api.iconify.design/<set>:<name>.png` ritorna 404 (PNG è premium)
+- `https://api.iconify.design/<set>:<name>.svg?color=%23000` funziona
+- Iconify rifiuta richieste senza User-Agent (HTTP 403). Sempre includere
+  `User-Agent: dymo-web/1.0` nelle Request urllib
+- Conversione SVG → PNG via svglib + reportlab (pure Python, ma trascina
+  pycairo che richiede cairo system lib: `brew install cairo` su Mac,
+  `apt install libcairo2` su Pi)
+- Cache PNG renderizzato a 600px in /tmp/dymo-web-icons/, PIL ridimensiona
+  on-demand. Cache miss = ~200ms, cache hit = ~10ms
 
 ### Font: cross-platform via FONT_FACES
 - macOS: `Helvetica.ttc` (1 file, 4 facce per index — Regular/Bold/Oblique/BoldOblique)

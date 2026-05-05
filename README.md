@@ -10,23 +10,33 @@ stessa rete Wi-Fi e stampa.
 
 - **Editor rich text** (contenteditable nativo): seleziona una parte del testo e
   applica grassetto / corsivo solo a quella.
-- **4 preset etichette adesive** (89×36, 89×28, 57×32, 32×57 mm) e
-  **4 preset nastro D1** (9, 12, 19, 24 mm).
-- **Auto-selezione stampante** in base al tipo di preset (slot Label vs slot Tape).
-- **Auto-fit del font** (binary search sulla dimensione massima che entra), con
-  override manuale tramite slider e pulsante "Auto" per tornare indietro.
-- **Auto-fit della lunghezza** sui nastri (come fa la app DYMO ufficiale).
-- **Allineamento** sinistra / centro / destra.
-- **QR code opzionale** a sinistra del testo.
+- **4 preset etichette adesive** (89×36, 89×28, 57×32, 32×57 mm) +
+  **3 multipurpose/shipping** (102×54 / 51×19 / 25×25 mm) +
+  **4 preset nastro D1** (9, 12, 19, 24 mm). Default: 11354 (57×32 mm).
+- **Auto-selezione stampante** in base al tipo di preset (slot Label vs Tape).
+  Il selettore si nasconde quando c'è un'unica scelta sensata.
+- **Auto-fit del font** (binary search), con override slider + bottone "Auto",
+  e **margine di sicurezza** configurabile dalla pagina Impostazioni.
+- **Auto-fit della lunghezza** sui nastri (come la app DYMO ufficiale).
+- **Allineamento** sx / centro / dx (icone stile word-processor).
+- **Decoro** (mutuamente esclusivo): QR code o **icona da [Iconify](https://iconify.design/)**
+  (~150k icone ricercabili da una sola search box). Posizionabile sx/dx/sopra/sotto
+  rispetto al testo, oppure centrato se l'etichetta non ha testo.
+- **Pagina Impostazioni** (icona ⚙ in alto a destra) per regolare il margine
+  auto-fit; predisposta per future opzioni.
 - **Anteprima live** con debounce 300 ms.
 
 ## Setup
 
 ```bash
 cd ~/Claude\ Code/dymo-web
+# system dep per il rendering SVG delle icone Iconify
+brew install cairo pkg-config        # macOS
+# (Pi: vedi scripts/update-deps.sh — fa apt install libcairo2)
+
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig pip install -r requirements.txt
 cp .env.example .env   # opzionale, default PORT=5050
 ```
 

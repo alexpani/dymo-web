@@ -139,12 +139,15 @@ def _wrap_paragraph(fragments, max_width, draw, get_font):
     return [l for l in lines if l] or [[]]
 
 
-def _layout(runs, max_width, max_height, font_size_pt=None):
+def _layout(runs, max_width, max_height, font_size_pt=None, auto_fit_safety=0.0):
     """
     Returns (size, lines, line_height). Each line is a list of fragments.
     If font_size_pt is given, uses it; otherwise binary-searches the largest
-    size that fits.
+    size that fits, optionally reducing the available height by auto_fit_safety
+    (0..0.5) to leave breathing room.
     """
+    if not font_size_pt and auto_fit_safety:
+        max_height = int(max_height * max(0.0, 1.0 - min(0.5, auto_fit_safety)))
     tmp_img = Image.new('RGB', (1, 1))
     tmp_draw = ImageDraw.Draw(tmp_img)
     paragraphs = _split_paragraphs(runs)
@@ -187,7 +190,7 @@ def _layout(runs, max_width, max_height, font_size_pt=None):
 
 def render(format_index, runs=None,
            decor='none', qr_content='', icon_id='', decor_position='left',
-           align='center', font_size_pt=None,
+           align='center', font_size_pt=None, auto_fit_safety=0.0,
            text='', bold=False, italic=False,
            # legacy aliases (older clients / curl scripts):
            qr_enabled=False, qr_position=None):
@@ -215,8 +218,8 @@ def render(format_index, runs=None,
         decor_position = qr_position
 
     if fmt.get('kind') == 'tape':
-        return _render_tape(fmt, runs, align, font_size_pt)
-    return _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align, font_size_pt)
+        return _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety)
+    return _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align, font_size_pt, auto_fit_safety)
 
 
 def _make_qr(qr_content, max_size_px):
@@ -290,7 +293,7 @@ def _build_decor(decor, qr_content, icon_id, size_px):
     return None
 
 
-def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align, font_size_pt):
+def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align, font_size_pt, auto_fit_safety=0.0):
     width_px = mm_to_px(fmt['width_mm'])
     height_px = mm_to_px(fmt['height_mm'])
     pad = mm_to_px(2)
@@ -349,12 +352,12 @@ def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align, 
                 img.paste(d_img, (dx, dy))
 
     if has_text and text_w > 10 and text_h > 10:
-        size, lines, line_h = _layout(runs, text_w, text_h, font_size_pt)
+        size, lines, line_h = _layout(runs, text_w, text_h, font_size_pt, auto_fit_safety)
         _draw_lines(draw, lines, _font_cache(size), text_x, text_y, text_w, text_h, line_h, align)
     return img
 
 
-def _render_tape(fmt, runs, align, font_size_pt):
+def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0):
     """
     Tape: width fixed (= tape width), length auto-fit. Computes the largest
     font that fits vertically, then sizes the canvas length to the longest line.
@@ -374,7 +377,7 @@ def _render_tape(fmt, runs, align, font_size_pt):
         return Image.new('RGB', (min_length_px, height_px), 'white')
 
     # No-wrap layout: each paragraph is its own line, width unconstrained.
-    size, lines, line_h = _layout(runs, max_length_px, text_h, font_size_pt)
+    size, lines, line_h = _layout(runs, max_length_px, text_h, font_size_pt, auto_fit_safety)
 
     tmp_img = Image.new('RGB', (1, 1))
     tmp_draw = ImageDraw.Draw(tmp_img)

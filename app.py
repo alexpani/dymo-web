@@ -8,6 +8,7 @@ from waitress import serve
 from dotenv import load_dotenv
 from label_render import FORMATS, render, resolve_cups_media
 from printing import list_printers, print_label
+import settings as app_settings
 
 load_dotenv()
 
@@ -28,6 +29,7 @@ def get_formats():
     ])
 
 def _render_kwargs(data):
+    cfg = app_settings.load()
     return {
         'format_index': data.get('format', 0),
         'runs': data.get('runs'),
@@ -43,6 +45,8 @@ def _render_kwargs(data):
         'italic': data.get('italic', False),
         'align': data.get('align', 'center'),
         'font_size_pt': data.get('font_size_pt') or None,
+        # server-side settings (not from the client)
+        'auto_fit_safety': cfg.get('auto_fit_safety', 0.0),
     }
 
 @app.route('/api/preview', methods=['POST'])
@@ -77,6 +81,25 @@ def print_endpoint():
         return jsonify({'ok': ok, 'message': message})
     except Exception as e:
         return jsonify({'ok': False, 'message': str(e)}), 500
+
+@app.route('/settings')
+def settings_page():
+    return send_from_directory('static', 'settings.html')
+
+
+@app.route('/api/settings', methods=['GET'])
+def api_settings_get():
+    return jsonify(app_settings.load())
+
+
+@app.route('/api/settings', methods=['PUT'])
+def api_settings_put():
+    try:
+        data = request.get_json() or {}
+        return jsonify(app_settings.save(data))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
 
 @app.route('/api/icons/search')
 def icons_search():
