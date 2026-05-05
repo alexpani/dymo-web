@@ -6,10 +6,17 @@ import qrcode
 FONT_PATH = '/System/Library/Fonts/Helvetica.ttc'
 
 FORMATS = [
-    {'name': '89 × 36 mm (Address, 99012)',         'width_mm': 89, 'height_mm': 36, 'code': '99012', 'cups_media': 'w101h252'},
-    {'name': '57 × 32 mm (Multipurpose, 11354)',    'width_mm': 57, 'height_mm': 32, 'code': '11354', 'cups_media': 'w162h90'},
-    {'name': '32 × 57 mm (Multipurpose vertical)',  'width_mm': 32, 'height_mm': 57, 'code': '11354', 'cups_media': 'w162h90'},
-    {'name': '89 × 28 mm (Address Small, 99010)',   'width_mm': 89, 'height_mm': 28, 'code': '99010', 'cups_media': 'w81h252'},
+    # Pre-cut adhesive labels (DYMO_LabelWriter_DUO_Label)
+    {'name': '89 × 36 mm (Address, 99012)',         'width_mm': 89, 'height_mm': 36, 'code': '99012', 'cups_media': 'w101h252', 'kind': 'label'},
+    {'name': '57 × 32 mm (Multipurpose, 11354)',    'width_mm': 57, 'height_mm': 32, 'code': '11354', 'cups_media': 'w162h90',  'kind': 'label'},
+    {'name': '32 × 57 mm (Multipurpose vertical)',  'width_mm': 32, 'height_mm': 57, 'code': '11354', 'cups_media': 'w162h90',  'kind': 'label'},
+    {'name': '89 × 28 mm (Address Small, 99010)',   'width_mm': 89, 'height_mm': 28, 'code': '99010', 'cups_media': 'w81h252',  'kind': 'label'},
+    # Continuous D1 tape (DYMO_LabelWriter_DUO_Tape_*). width_mm = tape width,
+    # height_mm = minimum length; actual length is auto-fit to content.
+    {'name': 'Nastro 9 mm  (auto-fit)',             'width_mm': 9,  'height_mm': 25, 'code': 'D1-9',  'cups_media': 'w26h4000', 'kind': 'tape'},
+    {'name': 'Nastro 12 mm (auto-fit)',             'width_mm': 12, 'height_mm': 25, 'code': 'D1-12', 'cups_media': 'w35h4000', 'kind': 'tape'},
+    {'name': 'Nastro 19 mm (auto-fit)',             'width_mm': 19, 'height_mm': 25, 'code': 'D1-19', 'cups_media': 'w55h4000', 'kind': 'tape'},
+    {'name': 'Nastro 24 mm (auto-fit)',             'width_mm': 24, 'height_mm': 25, 'code': 'D1-24', 'cups_media': 'w68h4000', 'kind': 'tape'},
 ]
 
 DPI = 300
@@ -153,8 +160,21 @@ def render(format_index, runs=None, qr_enabled=False, qr_content='',
     text/bold/italic: legacy single-run shortcut, used only if runs is None/empty.
     align:   'left' | 'center' | 'right'
     font_size_pt: int forced size, or None for auto-fit.
+
+    For 'label' kind: PNG dimensions are fixed by the preset.
+    For 'tape' kind:  PNG height is the tape width; PNG length is auto-fit to
+                       the longest rendered line (clamped to height_mm minimum).
     """
     fmt = FORMATS[format_index]
+    if not runs:
+        runs = [{'text': text, 'bold': bold, 'italic': italic}]
+
+    if fmt.get('kind') == 'tape':
+        return _render_tape(fmt, runs, align, font_size_pt)
+    return _render_label(fmt, runs, qr_enabled, qr_content, align, font_size_pt)
+
+
+def _render_label(fmt, runs, qr_enabled, qr_content, align, font_size_pt):
     width_px = mm_to_px(fmt['width_mm'])
     height_px = mm_to_px(fmt['height_mm'])
 
@@ -163,12 +183,8 @@ def render(format_index, runs=None, qr_enabled=False, qr_content='',
 
     qr_img = None
     if qr_enabled and qr_content:
-        qr = qrcode.QRCode(
-            version=1,
-            error_correction=qrcode.constants.ERROR_CORRECT_L,
-            box_size=5,
-            border=1,
-        )
+        qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L,
+                           box_size=5, border=1)
         qr.add_data(qr_content)
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color='black', back_color='white')
@@ -188,17 +204,53 @@ def render(format_index, runs=None, qr_enabled=False, qr_content='',
     text_w = width_px - text_x - pad
     text_h = height_px - 2 * pad
 
-    if not runs:
-        runs = [{'text': text, 'bold': bold, 'italic': italic}]
     if not any(r.get('text') for r in runs):
         return img
 
     size, lines, line_h = _layout(runs, text_w, text_h, font_size_pt)
-    get_font = _font_cache(size)
+    _draw_lines(draw, lines, _font_cache(size), text_x, text_y, text_w, text_h, line_h, align)
+    return img
 
+
+def _render_tape(fmt, runs, align, font_size_pt):
+    """
+    Tape: width fixed (= tape width), length auto-fit. Computes the largest
+    font that fits vertically, then sizes the canvas length to the longest line.
+    """
+    height_px = mm_to_px(fmt['width_mm'])         # PNG height = tape width
+    min_length_px = mm_to_px(fmt['height_mm'])    # minimum PNG length
+    max_length_px = mm_to_px(1400)                # cap (CUPS w*h4000 ~= 1411 mm)
+
+    pad_short = mm_to_px(1)   # vertical padding (along tape width)
+    pad_long = mm_to_px(2)    # horizontal padding (along tape length)
+    text_h = height_px - 2 * pad_short
+
+    if not any(r.get('text') for r in runs):
+        return Image.new('RGB', (min_length_px, height_px), 'white')
+
+    # No-wrap layout: each paragraph is its own line, width unconstrained.
+    size, lines, line_h = _layout(runs, max_length_px, text_h, font_size_pt)
+
+    tmp_img = Image.new('RGB', (1, 1))
+    tmp_draw = ImageDraw.Draw(tmp_img)
+    get_font = _font_cache(size)
+    widest = max(
+        (sum(tmp_draw.textlength(fr['text'], font=get_font(fr['bold'], fr['italic'])) for fr in line)
+         for line in lines if line),
+        default=0,
+    )
+    width_px = max(min_length_px, int(widest) + 2 * pad_long)
+
+    img = Image.new('RGB', (width_px, height_px), 'white')
+    draw = ImageDraw.Draw(img)
+    _draw_lines(draw, lines, get_font, pad_long, pad_short,
+                width_px - 2 * pad_long, text_h, line_h, align)
+    return img
+
+
+def _draw_lines(draw, lines, get_font, text_x, text_y, text_w, text_h, line_h, align):
     total_h = len(lines) * line_h + max(0, len(lines) - 1) * (line_h * 0.2)
     y = text_y + max(0, (text_h - total_h) / 2)
-
     for line in lines:
         line_w = sum(draw.textlength(fr['text'], font=get_font(fr['bold'], fr['italic'])) for fr in line)
         if align == 'right':
@@ -212,5 +264,3 @@ def render(format_index, runs=None, qr_enabled=False, qr_content='',
             draw.text((x, y), fr['text'], fill='black', font=font)
             x += draw.textlength(fr['text'], font=font)
         y += line_h * 1.2
-
-    return img

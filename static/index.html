@@ -283,11 +283,17 @@ async function loadPrinters() {
     if (p.is_default) opt.selected = true;
     sel.appendChild(opt);
   });
-  // Prefer DYMO Label slot if present (skip Tape)
-  const dymoLabel = [...sel.options].find(o =>
-    /dymo/i.test(o.value) && /label/i.test(o.value) && !/tape/i.test(o.value)
-  );
-  if (dymoLabel) sel.value = dymoLabel.value;
+  selectPrinterFor('label');
+}
+
+function selectPrinterFor(kind) {
+  const sel = $('printer');
+  const isTape = kind === 'tape';
+  const match = [...sel.options].find(o => {
+    if (!/dymo/i.test(o.value)) return false;
+    return isTape ? /tape/i.test(o.value) : (/label/i.test(o.value) && !/tape/i.test(o.value));
+  });
+  if (match) sel.value = match.value;
 }
 
 async function loadFormats() {
@@ -376,7 +382,10 @@ function syncFormatButtons() {
 async function updatePreview() {
   const payload = getPayload();
   const fmt = formats[payload.format];
-  $('preview_meta').textContent = `${fmt.width_mm} × ${fmt.height_mm} mm — ${fmt.cups_media || 'Custom.' + fmt.width_mm + 'x' + fmt.height_mm + 'mm'}`;
+  const media = fmt.cups_media || 'Custom.' + fmt.width_mm + 'x' + fmt.height_mm + 'mm';
+  $('preview_meta').textContent = fmt.kind === 'tape'
+    ? `Nastro ${fmt.width_mm} mm — lunghezza auto-fit — ${media}`
+    : `${fmt.width_mm} × ${fmt.height_mm} mm — ${media}`;
 
   try {
     const res = await fetch('/api/preview', {
@@ -445,7 +454,11 @@ async function doPrint() {
 }
 
 // Wire up events
-$('format').addEventListener('change', schedulePreview);
+$('format').addEventListener('change', () => {
+  const fmt = formats[parseInt($('format').value, 10)];
+  if (fmt) selectPrinterFor(fmt.kind || 'label');
+  schedulePreview();
+});
 $('text').addEventListener('input', () => { syncFormatButtons(); schedulePreview(); });
 $('text').addEventListener('keyup', syncFormatButtons);
 $('text').addEventListener('mouseup', syncFormatButtons);
