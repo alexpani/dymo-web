@@ -183,19 +183,23 @@ def _layout(runs, max_width, max_height, font_size_pt=None):
 
 
 def render(format_index, runs=None, qr_enabled=False, qr_content='',
-           align='center', font_size_pt=None,
+           align='center', font_size_pt=None, qr_position='left',
            text='', bold=False, italic=False):
     """
     Render a label as PIL.Image.
 
-    runs:    list of {text, bold, italic}. Newlines '\\n' inside text split paragraphs.
+    runs:        list of {text, bold, italic}. '\\n' inside text splits paragraphs.
     text/bold/italic: legacy single-run shortcut, used only if runs is None/empty.
-    align:   'left' | 'center' | 'right'
+    align:       'left' | 'center' | 'right' (text alignment within its area)
     font_size_pt: int forced size, or None for auto-fit.
+    qr_position: 'left' | 'right' | 'top' | 'bottom' — placement of the QR code
+                 relative to the text. Ignored when there's no text (QR is then
+                 centered).
 
     For 'label' kind: PNG dimensions are fixed by the preset.
     For 'tape' kind:  PNG height is the tape width; PNG length is auto-fit to
                        the longest rendered line (clamped to height_mm minimum).
+                       QR is currently not supported on tape.
     """
     fmt = FORMATS[format_index]
     if not runs:
@@ -203,44 +207,71 @@ def render(format_index, runs=None, qr_enabled=False, qr_content='',
 
     if fmt.get('kind') == 'tape':
         return _render_tape(fmt, runs, align, font_size_pt)
-    return _render_label(fmt, runs, qr_enabled, qr_content, align, font_size_pt)
+    return _render_label(fmt, runs, qr_enabled, qr_content, align, font_size_pt, qr_position)
 
 
-def _render_label(fmt, runs, qr_enabled, qr_content, align, font_size_pt):
+def _make_qr(qr_content, max_size_px):
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L,
+                       box_size=5, border=1)
+    qr.add_data(qr_content)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+    return img.resize((max_size_px, max_size_px), Image.Resampling.LANCZOS)
+
+
+def _render_label(fmt, runs, qr_enabled, qr_content, align, font_size_pt, qr_position='left'):
     width_px = mm_to_px(fmt['width_mm'])
     height_px = mm_to_px(fmt['height_mm'])
+    pad = mm_to_px(2)
 
     img = Image.new('RGB', (width_px, height_px), 'white')
     draw = ImageDraw.Draw(img)
 
-    qr_img = None
-    if qr_enabled and qr_content:
-        qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L,
-                           box_size=5, border=1)
-        qr.add_data(qr_content)
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color='black', back_color='white')
-        qr_size = min(height_px - 10, width_px // 3)
-        qr_img = qr_img.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
+    has_text = any(r.get('text') for r in runs)
+    has_qr = bool(qr_enabled and qr_content)
 
-    qr_width = 0
-    if qr_img:
-        x = 5
-        y = (height_px - qr_img.size[1]) // 2
-        img.paste(qr_img, (x, y))
-        qr_width = qr_img.size[0] + 10
-
-    pad = mm_to_px(2)
-    text_x = qr_width + pad
-    text_y = pad
-    text_w = width_px - text_x - pad
-    text_h = height_px - 2 * pad
-
-    if not any(r.get('text') for r in runs):
+    # QR sizing depends on layout
+    if has_qr and not has_text:
+        # Centered QR: as big as the shorter side allows, leaving padding
+        qr_size = min(width_px, height_px) - 2 * pad
+        qr_img = _make_qr(qr_content, max(20, qr_size))
+        qx = (width_px - qr_img.size[0]) // 2
+        qy = (height_px - qr_img.size[1]) // 2
+        img.paste(qr_img, (qx, qy))
         return img
 
-    size, lines, line_h = _layout(runs, text_w, text_h, font_size_pt)
-    _draw_lines(draw, lines, _font_cache(size), text_x, text_y, text_w, text_h, line_h, align)
+    qr_img = None
+    text_x, text_y = pad, pad
+    text_w = width_px - 2 * pad
+    text_h = height_px - 2 * pad
+
+    if has_qr:
+        if qr_position in ('left', 'right'):
+            qr_size = min(height_px - 2 * pad, width_px // 3)
+        else:  # top, bottom
+            qr_size = min(width_px - 2 * pad, height_px // 3)
+        qr_size = max(20, qr_size)
+        qr_img = _make_qr(qr_content, qr_size)
+
+        if qr_position == 'left':
+            qx, qy = pad, (height_px - qr_img.size[1]) // 2
+            text_x = qx + qr_img.size[0] + pad
+            text_w = width_px - text_x - pad
+        elif qr_position == 'right':
+            qx, qy = width_px - qr_img.size[0] - pad, (height_px - qr_img.size[1]) // 2
+            text_w = qx - 2 * pad
+        elif qr_position == 'top':
+            qx, qy = (width_px - qr_img.size[0]) // 2, pad
+            text_y = qy + qr_img.size[1] + pad
+            text_h = height_px - text_y - pad
+        else:  # bottom
+            qx, qy = (width_px - qr_img.size[0]) // 2, height_px - qr_img.size[1] - pad
+            text_h = qy - 2 * pad
+        img.paste(qr_img, (qx, qy))
+
+    if has_text and text_w > 10 and text_h > 10:
+        size, lines, line_h = _layout(runs, text_w, text_h, font_size_pt)
+        _draw_lines(draw, lines, _font_cache(size), text_x, text_y, text_w, text_h, line_h, align)
     return img
 
 

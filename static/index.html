@@ -264,6 +264,12 @@
       <label for="qr_enabled">Aggiungi QR code</label>
     </div>
     <input type="text" id="qr_content" placeholder="Contenuto del QR (URL, testo...)" disabled>
+    <select id="qr_position" disabled style="margin-top: 0.5rem;">
+      <option value="left" selected>QR a sinistra (testo a destra)</option>
+      <option value="right">QR a destra (testo a sinistra)</option>
+      <option value="top">QR in alto (testo in basso)</option>
+      <option value="bottom">QR in basso (testo in alto)</option>
+    </select>
   </div>
 
   <div class="card">
@@ -396,6 +402,7 @@ function getPayload() {
     runs: extractRuns($('text')),
     qr_enabled: $('qr_enabled').checked,
     qr_content: $('qr_content').value,
+    qr_position: $('qr_position').value,
     align: state.align,
     font_size_pt: sliderVal > 0 ? sliderVal : null,
   };
@@ -495,10 +502,13 @@ document.addEventListener('selectionchange', () => {
   if (document.activeElement === $('text')) syncFormatButtons();
 });
 $('qr_enabled').addEventListener('change', () => {
-  $('qr_content').disabled = !$('qr_enabled').checked;
+  const on = $('qr_enabled').checked;
+  $('qr_content').disabled = !on;
+  $('qr_position').disabled = !on;
   schedulePreview();
 });
 $('qr_content').addEventListener('input', schedulePreview);
+$('qr_position').addEventListener('change', schedulePreview);
 $('print_btn').addEventListener('click', doPrint);
 
 function applyFormat(cmd) {

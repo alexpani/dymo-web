@@ -31,6 +31,7 @@ def _render_kwargs(data):
         'text': data.get('text', ''),
         'qr_enabled': data.get('qr_enabled', False),
         'qr_content': data.get('qr_content', ''),
+        'qr_position': data.get('qr_position', 'left'),
         'bold': data.get('bold', False),
         'italic': data.get('italic', False),
         'align': data.get('align', 'center'),
