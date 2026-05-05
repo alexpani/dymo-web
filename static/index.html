@@ -225,9 +225,30 @@
       <button class="toggle-btn" id="bold_btn" title="Grassetto"><b>B</b></button>
       <button class="toggle-btn" id="italic_btn" title="Corsivo"><i>I</i></button>
       <div class="seg-group" id="align_group">
-        <button class="seg" data-align="left" title="Allinea a sinistra">⯇</button>
-        <button class="seg active" data-align="center" title="Centra">≡</button>
-        <button class="seg" data-align="right" title="Allinea a destra">⯈</button>
+        <button class="seg" data-align="left" title="Allinea a sinistra" aria-label="Allinea a sinistra">
+          <svg viewBox="0 0 16 12" width="16" height="12" fill="currentColor" aria-hidden="true">
+            <rect x="0" y="0"  width="16" height="1.5"/>
+            <rect x="0" y="3"  width="10" height="1.5"/>
+            <rect x="0" y="6"  width="14" height="1.5"/>
+            <rect x="0" y="9"  width="7"  height="1.5"/>
+          </svg>
+        </button>
+        <button class="seg active" data-align="center" title="Centra" aria-label="Centra">
+          <svg viewBox="0 0 16 12" width="16" height="12" fill="currentColor" aria-hidden="true">
+            <rect x="0" y="0"  width="16" height="1.5"/>
+            <rect x="3" y="3"  width="10" height="1.5"/>
+            <rect x="1" y="6"  width="14" height="1.5"/>
+            <rect x="4.5" y="9" width="7" height="1.5"/>
+          </svg>
+        </button>
+        <button class="seg" data-align="right" title="Allinea a destra" aria-label="Allinea a destra">
+          <svg viewBox="0 0 16 12" width="16" height="12" fill="currentColor" aria-hidden="true">
+            <rect x="0" y="0"  width="16" height="1.5"/>
+            <rect x="6" y="3"  width="10" height="1.5"/>
+            <rect x="2" y="6"  width="14" height="1.5"/>
+            <rect x="9" y="9"  width="7" height="1.5"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -309,8 +330,12 @@ async function loadFormats() {
     const opt = document.createElement('option');
     opt.value = f.index;
     opt.textContent = f.name;
+    if (f.is_default) opt.selected = true;
     sel.appendChild(opt);
   });
+  // Trigger printer auto-selection for the (possibly default) preset
+  const fmt = formats[parseInt(sel.value, 10)];
+  if (fmt) selectPrinterFor(fmt.kind || 'label');
 }
 
 const state = { align: 'center' };
