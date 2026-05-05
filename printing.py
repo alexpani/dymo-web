@@ -1,7 +1,7 @@
 import subprocess
 import tempfile
 import os
-from label_render import FORMATS
+from label_render import FORMATS, DPI
 
 def list_printers():
     """Return list of CUPS printers as [{name, is_default}]."""
@@ -59,11 +59,32 @@ def get_media_options(printer_name):
     return []
 
 
-def _media_for(fmt):
-    """Pick CUPS media name: prefer explicit cups_media, fallback to Custom.WxHmm."""
+def _px_to_mm(px):
+    return round(px / DPI * 25.4, 1)
+
+
+def _print_args(fmt, image):
+    """
+    Returns (image_to_save, media_arg, extra_opts) for the given preset+image.
+
+    For label kind: use the PPD-defined cups_media (or Custom.WxHmm fallback)
+    and let CUPS fit the PNG to the media.
+
+    For tape kind: rotate the landscape PNG to portrait so it matches the
+    CUPS portrait media orientation, then specify Custom.WIDTHxLENGTHmm with
+    the exact rendered length. Skip fit-to-page (no scaling).
+    """
+    if fmt.get('kind') == 'tape':
+        rotated = image.rotate(90, expand=True)
+        length_mm = _px_to_mm(rotated.size[1])  # portrait height after rotation
+        media = f"Custom.{fmt['width_mm']}x{length_mm}mm"
+        return rotated, media, []
+
     if fmt.get('cups_media'):
-        return fmt['cups_media']
-    return f"Custom.{fmt['width_mm']}x{fmt['height_mm']}mm"
+        media = fmt['cups_media']
+    else:
+        media = f"Custom.{fmt['width_mm']}x{fmt['height_mm']}mm"
+    return image, media, ['-o', 'fit-to-page']
 
 
 def print_label(printer_name, image, format_index):
@@ -72,26 +93,19 @@ def print_label(printer_name, image, format_index):
     Returns (ok: bool, message: str).
     """
     fmt = FORMATS[format_index]
+    img_to_send, media, extra = _print_args(fmt, image)
 
     tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
     try:
-        image.save(tmp.name, format='PNG')
+        img_to_send.save(tmp.name, format='PNG')
         tmp.close()
 
-        media = _media_for(fmt)
-        cmd = [
-            'lp',
-            '-d', printer_name,
-            '-o', f'media={media}',
-            '-o', 'fit-to-page',
-            tmp.name,
-        ]
+        cmd = ['lp', '-d', printer_name, '-o', f'media={media}', *extra, tmp.name]
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
             return True, result.stdout.strip()
-        else:
-            return False, result.stderr.strip() or result.stdout.strip()
+        return False, result.stderr.strip() or result.stdout.strip()
     finally:
         try:
             os.unlink(tmp.name)
@@ -102,5 +116,12 @@ def print_label(printer_name, image, format_index):
 def build_print_command(printer_name, format_index, png_path='<png_temp>'):
     """Return the lp command that would be executed (for dry-run inspection)."""
     fmt = FORMATS[format_index]
-    media = _media_for(fmt)
+    if fmt.get('kind') == 'tape':
+        # length placeholder; real length depends on rendered image
+        media = f"Custom.{fmt['width_mm']}xL_mm"
+        return ['lp', '-d', printer_name, '-o', f'media={media}', png_path]
+    if fmt.get('cups_media'):
+        media = fmt['cups_media']
+    else:
+        media = f"Custom.{fmt['width_mm']}x{fmt['height_mm']}mm"
     return ['lp', '-d', printer_name, '-o', f'media={media}', '-o', 'fit-to-page', png_path]
