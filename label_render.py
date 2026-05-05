@@ -190,7 +190,9 @@ def _layout(runs, max_width, max_height, font_size_pt=None, auto_fit_safety=0.0)
 
 def render(format_index, runs=None,
            decor='none', qr_content='', icon_id='', decor_position='left',
-           align='center', font_size_pt=None, auto_fit_safety=0.0,
+           align='center', font_size_pt=None,
+           auto_fit_safety=0.0, padding_mm=2.0,
+           offset_x_mm=0.0, offset_y_mm=0.0,
            text='', bold=False, italic=False,
            # legacy aliases (older clients / curl scripts):
            qr_enabled=False, qr_position=None):
@@ -218,8 +220,26 @@ def render(format_index, runs=None,
         decor_position = qr_position
 
     if fmt.get('kind') == 'tape':
-        return _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety)
-    return _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align, font_size_pt, auto_fit_safety)
+        img = _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety, padding_mm)
+    else:
+        img = _render_label(fmt, runs, decor, qr_content, icon_id, decor_position,
+                            align, font_size_pt, auto_fit_safety, padding_mm)
+    return _apply_offset(img, offset_x_mm, offset_y_mm)
+
+
+def _apply_offset(img, offset_x_mm, offset_y_mm):
+    """Translate the rendered content by (ox, oy) mm to compensate mechanical
+    printer misalignment. Pixels shifted out of frame are cropped; the freed
+    edge becomes white."""
+    if not offset_x_mm and not offset_y_mm:
+        return img
+    ox = mm_to_px(offset_x_mm)
+    oy = mm_to_px(offset_y_mm)
+    if ox == 0 and oy == 0:
+        return img
+    out = Image.new(img.mode, img.size, 'white')
+    out.paste(img, (ox, oy))
+    return out
 
 
 def _make_qr(qr_content, max_size_px):
@@ -293,10 +313,11 @@ def _build_decor(decor, qr_content, icon_id, size_px):
     return None
 
 
-def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align, font_size_pt, auto_fit_safety=0.0):
+def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
+                  font_size_pt, auto_fit_safety=0.0, padding_mm=2.0):
     width_px = mm_to_px(fmt['width_mm'])
     height_px = mm_to_px(fmt['height_mm'])
-    pad = mm_to_px(2)
+    pad = mm_to_px(padding_mm)
 
     img = Image.new('RGB', (width_px, height_px), 'white')
     draw = ImageDraw.Draw(img)
@@ -357,20 +378,20 @@ def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align, 
     return img
 
 
-def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0):
+def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0, padding_mm=2.0):
     """
     Tape: width fixed (= tape width), length auto-fit. Computes the largest
     font that fits vertically, then sizes the canvas length to the longest line.
+
+    padding_mm is split: ~75% horizontally (along the tape) and 50% vertically
+    (across the narrow tape width — even less air would crowd the glyphs).
     """
     height_px = mm_to_px(fmt['width_mm'])         # PNG height = tape width
     min_length_px = mm_to_px(fmt['height_mm'])    # minimum PNG length
     max_length_px = mm_to_px(1400)                # cap (CUPS w*h4000 ~= 1411 mm)
 
-    # On narrow tape (9mm) a 1mm pad leaves too little visual breathing room
-    # and the auto-fit pushes the font to the absolute max. 1.5mm gives a
-    # better-looking result without wasting much surface.
-    pad_short = mm_to_px(1.5)
-    pad_long = mm_to_px(2)
+    pad_short = mm_to_px(max(0.5, padding_mm * 0.75))
+    pad_long = mm_to_px(padding_mm)
     text_h = height_px - 2 * pad_short
 
     if not any(r.get('text') for r in runs):

@@ -38,12 +38,13 @@ printing.py         Due path stampa con auto-select:
                     - CUPS lp (macOS dev/staging): subprocess `lp` come fallback.
                     list_printers() advertise i 2 device direct in modalità Linux
                     o parsa lpstat (Mac).
-settings.py         Persistenza JSON (mac: ~/.config/dymo-web, linux: /etc/dymo-web).
-                    Server-side authoritative: render() legge i valori al momento.
-                    v1: solo auto_fit_safety (0..0.5).
-static/settings.html Pagina /settings con slider per auto_fit_safety.
-                    Predisposta per nuove opzioni: aggiungi key in DEFAULTS,
-                    nuovo campo HTML, leggi/scrivi in PUT/GET via /api/settings.
+presets_store.py    JSON store ~/.config/dymo-web/preset_overrides.json (writable
+                    by the running user — was the bug of the old settings.py
+                    that wrote to /etc/dymo-web). Per-preset overrides keyed by
+                    preset 'name': offset_x/y_mm, auto_fit_safety, padding_mm.
+                    DEFAULTS define the values used when no override exists.
+static/presets.html Pagina /presets: lista preset, click per espandere form
+                    di override (offset, safety, padding) con Salva/Reset.
 scripts/update-deps.sh  Aggiorna pacchetti Pi quando cambiano le dependencies
                         (apt install libcairo2 + pip install -r requirements.txt
                         + restart). Da lanciare a mano dopo che le deps cambiano.

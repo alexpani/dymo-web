@@ -8,7 +8,7 @@ from waitress import serve
 from dotenv import load_dotenv
 from label_render import FORMATS, render, resolve_cups_media
 from printing import list_printers, print_label
-import settings as app_settings
+import presets_store
 
 load_dotenv()
 
@@ -29,9 +29,11 @@ def get_formats():
     ])
 
 def _render_kwargs(data):
-    cfg = app_settings.load()
+    fmt_index = data.get('format', 0)
+    fmt = FORMATS[fmt_index] if 0 <= fmt_index < len(FORMATS) else FORMATS[0]
+    overrides = presets_store.get(fmt['name'])
     return {
-        'format_index': data.get('format', 0),
+        'format_index': fmt_index,
         'runs': data.get('runs'),
         'text': data.get('text', ''),
         'decor': data.get('decor', 'none'),
@@ -45,8 +47,11 @@ def _render_kwargs(data):
         'italic': data.get('italic', False),
         'align': data.get('align', 'center'),
         'font_size_pt': data.get('font_size_pt') or None,
-        # server-side settings (not from the client)
-        'auto_fit_safety': cfg.get('auto_fit_safety', 0.0),
+        # per-preset overrides (server-side authoritative)
+        'auto_fit_safety': overrides['auto_fit_safety'],
+        'padding_mm':      overrides['padding_mm'],
+        'offset_x_mm':     overrides['offset_x_mm'],
+        'offset_y_mm':     overrides['offset_y_mm'],
     }
 
 @app.route('/api/preview', methods=['POST'])
@@ -82,21 +87,33 @@ def print_endpoint():
     except Exception as e:
         return jsonify({'ok': False, 'message': str(e)}), 500
 
-@app.route('/settings')
-def settings_page():
-    return send_from_directory('static', 'settings.html')
+@app.route('/presets')
+def presets_page():
+    return send_from_directory('static', 'presets.html')
 
 
-@app.route('/api/settings', methods=['GET'])
-def api_settings_get():
-    return jsonify(app_settings.load())
+@app.route('/api/preset_overrides', methods=['GET'])
+def api_overrides_get():
+    """Return both DEFAULTS and the current per-preset overrides."""
+    return jsonify({
+        'defaults': presets_store.DEFAULTS,
+        'overrides': presets_store.load_all(),
+    })
 
 
-@app.route('/api/settings', methods=['PUT'])
-def api_settings_put():
+@app.route('/api/preset_overrides/<path:name>', methods=['PUT'])
+def api_overrides_put(name):
     try:
         data = request.get_json() or {}
-        return jsonify(app_settings.save(data))
+        return jsonify(presets_store.save(name, data))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/preset_overrides/<path:name>', methods=['DELETE'])
+def api_overrides_delete(name):
+    try:
+        return jsonify(presets_store.reset(name))
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestione preset — DYMO Label</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #fff; --border: #d2d2d7;
+    --text: #1d1d1f; --muted: #6e6e73;
+    --accent: #0071e3; --accent-hover: #0077ed;
+    --ok: #2e7d32; --err: #c62828; --warn: #ed8a00;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1rem;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text);
+  }
+  .container { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 1rem; display: flex; align-items: center; gap: 0.5rem; }
+  .back-link {
+    color: var(--accent); text-decoration: none;
+    font-size: 1rem; font-weight: 500;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 0.75rem 1rem; margin-bottom: 0.6rem;
+  }
+  .preset-row {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; gap: 0.75rem;
+  }
+  .preset-row:hover { color: var(--accent); }
+  .preset-name { font-weight: 500; }
+  .preset-meta { font-size: 0.85rem; color: var(--muted); }
+  .badge {
+    background: var(--warn); color: white;
+    padding: 0.1rem 0.45rem; border-radius: 999px;
+    font-size: 0.7rem; font-weight: 500;
+  }
+  .form { display: none; padding-top: 0.75rem; border-top: 1px solid var(--border); margin-top: 0.75rem; }
+  .form.open { display: block; }
+  .field { margin-bottom: 0.7rem; }
+  .field label {
+    display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.3rem;
+  }
+  .field-row {
+    display: flex; align-items: center; gap: 0.6rem;
+  }
+  .field-row input[type="number"] {
+    width: 6rem; padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 1rem; font-family: inherit;
+  }
+  .field-row input[type="range"] { flex: 1; }
+  .field-row .val {
+    font-variant-numeric: tabular-nums;
+    min-width: 4rem; text-align: right;
+  }
+  .field-help {
+    font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.3;
+  }
+  .actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+  button {
+    padding: 0.5rem 0.9rem; font-size: 0.95rem;
+    border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer; background: white; color: var(--text);
+  }
+  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  button.primary:hover { background: var(--accent-hover); }
+  button.danger { color: var(--err); }
+  button:hover:not(.primary) { background: #f0f0f3; }
+  .status {
+    margin-top: 0.5rem; padding: 0.4rem 0.6rem;
+    border-radius: 6px; font-size: 0.85rem; display: none;
+  }
+  .status.ok { display: block; background: #e8f5e9; color: var(--ok); }
+  .status.err { display: block; background: #ffebee; color: var(--err); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>
+    <a href="/" class="back-link" title="Torna alla home">←</a>
+    Preset
+  </h1>
+  <div id="list"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let DEFAULTS = {};
+let OVERRIDES = {};
+let FORMATS = [];
+
+async function load() {
+  const [presetsRes, formatsRes] = await Promise.all([
+    fetch('/api/preset_overrides'),
+    fetch('/api/formats'),
+  ]);
+  const data = await presetsRes.json();
+  DEFAULTS = data.defaults;
+  OVERRIDES = data.overrides;
+  FORMATS = await formatsRes.json();
+  render();
+}
+
+function render() {
+  const list = $('list');
+  list.innerHTML = '';
+  FORMATS.forEach(fmt => {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const hasOverride = !!OVERRIDES[fmt.name] && Object.keys(OVERRIDES[fmt.name]).length > 0;
+    const eff = { ...DEFAULTS, ...(OVERRIDES[fmt.name] || {}) };
+
+    const row = document.createElement('div');
+    row.className = 'preset-row';
+    row.innerHTML = `
+      <div>
+        <div class="preset-name">${escapeHtml(fmt.name)}</div>
+        <div class="preset-meta">${fmt.kind === 'tape'
+          ? `nastro ${fmt.width_mm} mm`
+          : `${fmt.width_mm} × ${fmt.height_mm} mm`} — ${fmt.cups_media || ''}</div>
+      </div>
+      <div>
+        ${hasOverride ? '<span class="badge">modificato</span>' : ''}
+        <span style="color: var(--muted); margin-left: 0.5rem;">▾</span>
+      </div>
+    `;
+    card.appendChild(row);
+
+    const form = buildForm(fmt, eff);
+    card.appendChild(form);
+    row.addEventListener('click', () => form.classList.toggle('open'));
+    list.appendChild(card);
+  });
+}
+
+function buildForm(fmt, eff) {
+  const form = document.createElement('div');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="field">
+      <label>Offset X (mm) — sposta a sinistra (negativo) o destra (positivo)</label>
+      <div class="field-row">
+        <input type="number" data-key="offset_x_mm" value="${eff.offset_x_mm}" step="0.1" min="-5" max="5">
+      </div>
+    </div>
+    <div class="field">
+      <label>Offset Y (mm) — sposta in alto (negativo) o basso (positivo)</label>
+      <div class="field-row">
+        <input type="number" data-key="offset_y_mm" value="${eff.offset_y_mm}" step="0.1" min="-5" max="5">
+      </div>
+    </div>
+    <div class="field">
+      <label>Margine auto-fit (% riduzione font)</label>
+      <div class="field-row">
+        <input type="range" data-key="auto_fit_safety" value="${Math.round(eff.auto_fit_safety * 100)}" min="0" max="50" step="1">
+        <span class="val"><span class="val-num">${Math.round(eff.auto_fit_safety * 100)}</span>%</span>
+      </div>
+      <div class="field-help">0% = font massimo possibile; 10-15% = un po' d'aria; 30-50% = molto più piccolo.</div>
+    </div>
+    <div class="field">
+      <label>Padding interno (mm)</label>
+      <div class="field-row">
+        <input type="number" data-key="padding_mm" value="${eff.padding_mm}" step="0.5" min="0" max="10">
+      </div>
+      <div class="field-help">Spazio bianco intorno a testo e decoro.</div>
+    </div>
+    <div class="actions">
+      <button class="primary" data-action="save">Salva</button>
+      <button class="danger" data-action="reset">Ripristina default</button>
+    </div>
+    <div class="status"></div>
+  `;
+  // Wire range live label
+  const range = form.querySelector('input[type="range"]');
+  range.addEventListener('input', () => {
+    form.querySelector('.val-num').textContent = range.value;
+  });
+
+  form.querySelector('[data-action="save"]').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await saveOverride(fmt.name, form);
+  });
+  form.querySelector('[data-action="reset"]').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await resetOverride(fmt.name, form);
+  });
+  // Block toggle when clicking inside the form
+  form.addEventListener('click', e => e.stopPropagation());
+  return form;
+}
+
+function readForm(form) {
+  const out = {};
+  form.querySelectorAll('input[data-key]').forEach(el => {
+    let v = parseFloat(el.value);
+    if (isNaN(v)) v = 0;
+    if (el.dataset.key === 'auto_fit_safety') v = v / 100;  // % -> fraction
+    out[el.dataset.key] = v;
+  });
+  return out;
+}
+
+async function saveOverride(name, form) {
+  const status = form.querySelector('.status');
+  status.className = 'status';
+  try {
+    const body = readForm(form);
+    const res = await fetch('/api/preset_overrides/' + encodeURIComponent(name), {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    OVERRIDES[name] = body;
+    status.className = 'status ok';
+    status.textContent = 'Salvato.';
+    render();
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = 'Errore: ' + e.message;
+  }
+}
+
+async function resetOverride(name, form) {
+  const status = form.querySelector('.status');
+  status.className = 'status';
+  try {
+    const res = await fetch('/api/preset_overrides/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    delete OVERRIDES[name];
+    status.className = 'status ok';
+    status.textContent = 'Ripristinato.';
+    render();
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = 'Errore: ' + e.message;
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+load();
+</script>
+</body>
+</html>

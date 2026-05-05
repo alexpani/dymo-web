@@ -22,8 +22,10 @@ stessa rete Wi-Fi e stampa.
 - **Decoro** (mutuamente esclusivo): QR code o **icona da [Iconify](https://iconify.design/)**
   (~150k icone ricercabili da una sola search box). Posizionabile sx/dx/sopra/sotto
   rispetto al testo, oppure centrato se l'etichetta non ha testo.
-- **Pagina Impostazioni** (icona ⚙ in alto a destra) per regolare il margine
-  auto-fit; predisposta per future opzioni.
+- **Gestore preset** (icona ⚙ in alto a destra → `/presets`): per ogni preset
+  puoi regolare offset stampa X/Y in mm (compensazione meccanica), margine
+  auto-fit del font, e padding interno. Override salvati in
+  `~/.config/dymo-web/preset_overrides.json`.
 - **Anteprima live** con debounce 300 ms.
 
 ## Setup
