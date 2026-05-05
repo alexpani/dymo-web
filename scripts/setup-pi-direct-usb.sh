@@ -8,16 +8,20 @@ sudo rm -f /etc/modprobe.d/blacklist-usblp.conf
 sudo modprobe usblp || true
 
 echo ""
-echo "=== 2. udev rule: /dev/usb/lp* writable without root ==="
-sudo tee /etc/udev/rules.d/91-dymo-direct.rules > /dev/null <<'EOF'
-# DYMO direct USB access — bypass CUPS backend, write to /dev/usb/lpN directly
-KERNEL=="lp[0-9]*", SUBSYSTEM=="usb", ATTRS{idVendor}=="0922", MODE="0666", TAG+="uaccess"
-EOF
-sudo udevadm control --reload-rules
-sudo udevadm trigger
+echo "=== 2. Add user to 'lp' group (immediate write access to /dev/usb/lp*) ==="
+sudo usermod -aG lp "$USER"
 
 echo ""
-echo "=== 3. Disable CUPS queues for DYMO (frees the device but keeps PPDs) ==="
+echo "=== 3. udev rule: /dev/usb/lp* writable for group 'lp' ==="
+sudo tee /etc/udev/rules.d/91-dymo-direct.rules > /dev/null <<'EOF'
+# DYMO direct USB access — bypass CUPS backend, write to /dev/usb/lpN directly
+KERNEL=="lp[0-9]*", SUBSYSTEM=="usbmisc", ATTRS{idVendor}=="0922", GROUP="lp", MODE="0660"
+EOF
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=usbmisc
+
+echo ""
+echo "=== 4. Disable CUPS queues for DYMO (frees the device but keeps PPDs) ==="
 # Don't delete the queues — we still need the PPD files for cupsfilter.
 # Just disable so CUPS won't try to dispatch jobs to them.
 for q in DYMO_LabelWriter_DUO_Label DYMO_LabelWriter_DUO_Tape_128; do
@@ -29,12 +33,13 @@ for q in DYMO_LabelWriter_DUO_Label DYMO_LabelWriter_DUO_Tape_128; do
 done
 
 echo ""
-echo "=== 4. Verify device nodes ==="
+echo "=== 5. Verify device nodes ==="
 sleep 1
 ls -la /dev/usb/lp* 2>/dev/null || { echo "ERROR: no /dev/usb/lp* — DYMO not detected by usblp"; exit 1; }
 
 echo ""
-echo "=== 5. Permission check ==="
+echo "=== 6. Permission check ==="
+echo "(NOTE: 'lp' group membership requires logout+login OR new SSH session to take effect)"
 for dev in /dev/usb/lp*; do
     if [ -w "$dev" ]; then
         echo "   OK: $dev writable as $USER"
