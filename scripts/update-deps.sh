@@ -3,9 +3,9 @@
 # Run on the Pi after pulling a commit that adds new dependencies.
 set -e
 
-echo "=== System packages (libcairo2 needed by svglib for icon rendering) ==="
+echo "=== System packages (libcairo2 + headers, needed by pycairo / svglib) ==="
 sudo apt-get update -qq
-sudo apt-get install -y libcairo2
+sudo apt-get install -y libcairo2 libcairo2-dev pkg-config
 
 echo ""
 echo "=== Python dependencies ==="
