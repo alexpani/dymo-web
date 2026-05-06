@@ -65,13 +65,46 @@ preserve_hostname: true
 EOF
 echo "  /etc/cloud/cloud.cfg.d/99-preserve-hostname.cfg installed"
 
-step "6. systemd unit"
+step "6. WiFi: bypass cloud-init bug, create NM profile from seed"
+# Pi OS Trixie's cloud-init is missing 'cc_netplan_nm_patch' so the WiFi
+# config in /boot/firmware/network-config never makes it into
+# NetworkManager. WiFi works on first boot but disappears on every reboot.
+# Workaround: read SSID + PSK from the seed and write a permanent NM
+# profile in /etc/NetworkManager/system-connections/ ourselves.
+SEED=/boot/firmware/network-config
+if [ -f "$SEED" ]; then
+    SSID=$(sudo awk '
+        /access-points:/{ flag=1; next }
+        flag && /^[[:space:]]*"/ {
+            gsub(/^[[:space:]]+|"|:[[:space:]]*$/, "")
+            print; exit
+        }' "$SEED")
+    PSK=$(sudo awk '/password:/ {gsub(/"/,"",$2); print $2}' "$SEED")
+    if [ -n "$SSID" ] && [ -n "$PSK" ]; then
+        if sudo nmcli -t -f NAME connection show 2>/dev/null | grep -qx "$SSID"; then
+            echo "  WiFi profile '$SSID' already present in NetworkManager — skipping"
+        else
+            sudo nmcli connection add type wifi con-name "$SSID" ifname wlan0 ssid "$SSID" \
+                wifi-sec.key-mgmt wpa-psk \
+                wifi-sec.psk "$PSK" \
+                connection.autoconnect yes \
+                802-11-wireless.powersave 2
+            echo "  WiFi profile '$SSID' added"
+        fi
+    else
+        echo "  (no WiFi config found in $SEED — skipping; eth0 will still work)"
+    fi
+else
+    echo "  ($SEED not found — skipping WiFi step)"
+fi
+
+step "7. systemd unit"
 sudo install -m 644 etc/dymo-gateway.service /etc/systemd/system/dymo-gateway.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now dymo-gateway
 
 sleep 1
-step "7. Health check"
+step "8. Health check"
 curl -s http://localhost:5051/health | python3 -m json.tool || echo "FAILED"
 
 echo ""
