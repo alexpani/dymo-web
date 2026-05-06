@@ -156,6 +156,20 @@ def _gateway_url():
     return (os.environ.get('DYMO_GATEWAY_URL') or '').rstrip('/')
 
 
+def _gateway_healthy():
+    """Quick HEAD-level check of the gateway. 1.5 s timeout — keeps
+    /api/printers responsive even when the Pi is offline."""
+    base = _gateway_url()
+    if not base:
+        return False
+    try:
+        with urllib.request.urlopen(f'{base}/health', timeout=1.5) as r:
+            data = json.loads(r.read().decode())
+        return bool(data.get('ok'))
+    except Exception:
+        return False
+
+
 def _print_via_gateway(image, kind, media):
     """
     POST the PNG + kind + media to the Pi gateway. The Pi runs the filter
@@ -216,8 +230,13 @@ def list_printers():
     Order of preference: gateway (env DYMO_GATEWAY_URL) > direct USB > lpstat.
     The two queues advertised in gateway/direct mode are virtual labels for
     the slot kind — the actual routing happens server-side.
+
+    In gateway mode, the gateway is health-checked first: if the Pi is
+    offline, returns an empty list so the frontend's status dot turns red.
     """
     if _gateway_url():
+        if not _gateway_healthy():
+            return []
         return [
             {'name': DIRECT_LABEL['name'], 'is_default': True},
             {'name': DIRECT_TAPE['name'],  'is_default': False},
