@@ -17,12 +17,12 @@ mkdir -p "$DEST"
 [ -f "$SRC/preset_overrides.json" ] && cp "$SRC/preset_overrides.json" "$DEST/preset_overrides.json"
 [ -f "$SRC/history.json" ]          && cp "$SRC/history.json"          "$DEST/history.json"
 
-# Anything to commit?
-if git diff --quiet -- data/; then
+# Stage first so untracked new files are visible to diff --cached.
+git add data/
+if git diff --cached --quiet -- data/; then
     exit 0
 fi
 
-git add data/
 TS=$(date +'%Y-%m-%d %H:%M')
 git -c user.email='dymo-web@dymo.local' \
     -c user.name='dymo-web backup' \
