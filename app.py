@@ -191,7 +191,7 @@ def icons_search():
     q = (request.args.get('q') or '').strip()
     if not q:
         return jsonify({'icons': []})
-    limit = min(int(request.args.get('limit', 24)), 96)
+    limit = min(int(request.args.get('limit', 64)), 999)
     url = f'https://api.iconify.design/search?query={urllib.parse.quote(q)}&limit={limit}'
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'dymo-web/1.0'})
