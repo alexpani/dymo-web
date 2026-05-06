@@ -192,7 +192,7 @@ def _layout(runs, max_width, max_height, font_size_pt=None,
     return best
 
 
-def render(format_index, runs=None,
+def render(fmt, runs=None,
            decor='none', qr_content='', icon_id='', decor_position='left',
            align='center', font_size_pt=None,
            auto_fit_safety=0.0, padding_mm=2.0, line_spacing=0.2,
@@ -203,6 +203,7 @@ def render(format_index, runs=None,
     """
     Render a label as PIL.Image.
 
+    fmt:             preset dict (name, width_mm, height_mm, kind, cups_media)
     decor:           'none' | 'qr' | 'icon'  (mutually exclusive)
     qr_content:      text/URL for the QR (used only when decor='qr')
     icon_id:         Iconify '<set>:<name>' (used only when decor='icon')
@@ -213,7 +214,6 @@ def render(format_index, runs=None,
     align:           text alignment within its area
     font_size_pt:    int forced size, or None for auto-fit
     """
-    fmt = FORMATS[format_index]
     if not runs:
         runs = [{'text': text, 'bold': bold, 'italic': italic}]
 

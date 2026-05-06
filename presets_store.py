@@ -78,8 +78,25 @@ def reset(preset_name):
     all_data = load_all()
     if preset_name in all_data:
         del all_data[preset_name]
-        path = _path()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'w') as f:
-            json.dump(all_data, f, indent=2)
+        _write(all_data)
     return DEFAULTS.copy()
+
+
+def rename(old_name, new_name):
+    """Move overrides from old_name to new_name (keeps the user's offset
+    tweaks across a preset rename). No-op if old_name has no overrides or
+    the names match."""
+    if old_name == new_name:
+        return
+    all_data = load_all()
+    if old_name not in all_data:
+        return
+    all_data[new_name] = all_data.pop(old_name)
+    _write(all_data)
+
+
+def _write(all_data):
+    path = _path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump(all_data, f, indent=2)

@@ -6,9 +6,10 @@ import urllib.parse
 from flask import Flask, jsonify, request, send_from_directory
 from waitress import serve
 from dotenv import load_dotenv
-from label_render import FORMATS, render, resolve_cups_media
+from label_render import render, resolve_cups_media
 from printing import list_printers, print_label
 import presets_store
+import presets_catalog
 import history
 
 load_dotenv()
@@ -22,11 +23,12 @@ def index():
 
 @app.route('/api/formats')
 def get_formats():
-    """Return available label formats. cups_media is resolved to the string
-    appropriate for the current platform (PPDs differ between macOS and Linux)."""
+    """Return the current preset catalog. cups_media is resolved to the
+    string appropriate for the current platform (PPDs differ between macOS
+    and Linux)."""
     return jsonify([
         {'index': i, **fmt, 'cups_media': resolve_cups_media(fmt)}
-        for i, fmt in enumerate(FORMATS)
+        for i, fmt in enumerate(presets_catalog.load())
     ])
 
 def _render_kwargs(data, for_print=False):
@@ -38,11 +40,14 @@ def _render_kwargs(data, for_print=False):
     but NOT to the on-screen preview — otherwise the preview shows the
     shifted layout, which is misleading. We force offsets to 0 for previews.
     """
+    presets = presets_catalog.load()
     fmt_index = data.get('format', 0)
-    fmt = FORMATS[fmt_index] if 0 <= fmt_index < len(FORMATS) else FORMATS[0]
+    if not (0 <= fmt_index < len(presets)):
+        fmt_index = 0
+    fmt = presets[fmt_index]
     overrides = presets_store.get(fmt['name'])
     return {
-        'format_index': fmt_index,
+        'fmt': fmt,
         'runs': data.get('runs'),
         'text': data.get('text', ''),
         'decor': data.get('decor', 'none'),
@@ -92,11 +97,10 @@ def print_endpoint():
     try:
         kwargs = _render_kwargs(data, for_print=True)
         img = render(**kwargs)
-        ok, message = print_label(printer_name, img, kwargs['format_index'])
+        ok, message = print_label(printer_name, img, kwargs['fmt'])
         if ok:
             try:
-                fmt = FORMATS[kwargs['format_index']]
-                meta = {'index': kwargs['format_index'], **fmt}
+                meta = {**kwargs['fmt']}
                 # Don't store the printer_name in the history (it changes per host)
                 payload = {k: v for k, v in data.items() if k != 'printer_name'}
                 history.add(payload, meta, img)
@@ -137,6 +141,44 @@ def api_overrides_delete(name):
         return jsonify({'error': str(e)}), 400
 
 
+# ── Preset catalog CRUD ──────────────────────────────────────────────────────
+@app.route('/api/presets', methods=['POST'])
+def api_presets_add():
+    try:
+        idx = presets_catalog.add(request.get_json() or {})
+        return jsonify({'ok': True, 'index': idx})
+    except (ValueError, TypeError) as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@app.route('/api/presets/<int:index>', methods=['PUT'])
+def api_presets_update(index):
+    try:
+        old_name, new_name = presets_catalog.update(index, request.get_json() or {})
+        # If the user renamed the preset, move its overrides over so the
+        # offset/safety/padding tweaks aren't silently lost.
+        presets_store.rename(old_name, new_name)
+        return jsonify({'ok': True, 'index': index})
+    except IndexError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 404
+    except (ValueError, TypeError) as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@app.route('/api/presets/<int:index>', methods=['DELETE'])
+def api_presets_delete(index):
+    try:
+        removed_name = presets_catalog.delete(index)
+        # Drop the orphan overrides too.
+        if removed_name:
+            presets_store.reset(removed_name)
+        return jsonify({'ok': True})
+    except IndexError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
 @app.route('/history')
 def history_page():
     return send_from_directory('static', 'history.html')
@@ -149,8 +191,7 @@ def api_history_post():
     try:
         kwargs = _render_kwargs(data, for_print=False)
         img = render(**kwargs)
-        fmt = FORMATS[kwargs['format_index']]
-        meta = {'index': kwargs['format_index'], **fmt}
+        meta = {**kwargs['fmt']}
         payload = {k: v for k, v in data.items() if k != 'printer_name'}
         entry = history.add(payload, meta, img)
         return jsonify({'ok': True, 'id': entry['id']})

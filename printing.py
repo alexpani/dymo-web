@@ -29,7 +29,7 @@ import urllib.request
 import urllib.error
 import json
 import io
-from label_render import FORMATS, DPI, resolve_cups_media
+from label_render import DPI, resolve_cups_media
 
 
 # ── Direct USB configuration (Linux only) ─────────────────────────────────────
@@ -276,12 +276,12 @@ def _list_printers_cups():
     return [{'name': p, 'is_default': p == default} for p in printers]
 
 
-def print_label(printer_name, image, format_index):
+def print_label(printer_name, image, fmt):
     """
     Render a label and send it to the printer.
+    fmt: preset dict (name, width_mm, height_mm, kind, cups_media).
     Returns (ok: bool, message: str).
     """
-    fmt = FORMATS[format_index]
     img_to_send, media = _print_args(fmt, image)
     kind = fmt.get('kind') or 'label'
 
