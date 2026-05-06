@@ -201,7 +201,14 @@ function buildForm(index, fmt, eff, isNew) {
       <div class="field-row">
         <input type="text" data-cat="cups_media" value="${escapeAttr(typeof fmt.cups_media === 'string' ? fmt.cups_media : '')}">
       </div>
-      <div class="field-help">Nome PPD (es. <code>w162h90</code>) o <code>Custom.WxHmm</code> per nastri.</div>
+      <div class="field-help">
+        Nome del formato carta che il driver DYMO conosce. Regola pratica:
+        <ul style="margin: 0.3rem 0 0 1rem; padding: 0;">
+          <li><b>Etichetta DYMO standard</b>: copia il <code>cups_media</code> da un preset built-in con la stessa misura (es. <code>w162h90</code> per 57×32 mm).</li>
+          <li><b>Misura custom</b>: usa <code>Custom.WxHmm</code> coi tuoi mm (es. <code>Custom.40x12mm</code>).</li>
+          <li><b>Nastro D1</b>: il valore è quasi simbolico, la pipeline lo sovrascrive runtime con la lunghezza effettiva. Va bene un placeholder tipo <code>w35h4000</code>.</li>
+        </ul>
+      </div>
     </div>
     <div class="actions">
       <button class="primary" data-action="${isNew ? 'create' : 'save-cat'}">${isNew ? 'Crea preset' : 'Salva caratteristiche'}</button>
