@@ -6,12 +6,18 @@ toccare il codice.
 ## Cos'è
 
 Web app personale per stampare etichette su una **DYMO LabelWriter Duo** (USB).
-Deploy permanente su Raspberry Pi 4. Frontend HTML/JS vanilla, backend Flask.
-Vedi `README.md` per setup, feature complete e troubleshooting.
 
-Repo pubblico: github.com/alexpani/dymo-web.
-Pi hostname: `dymo.local` (utente `alexpani`).
-URL produzione: `http://dymo.local:5050`.
+**Architettura distribuita** in produzione:
+- **LXC Debian su Proxmox** (`dymo.local`, IP 192.168.68.159) — l'app
+  Flask completa: render, history, presets, frontend, Iconify.
+- **Raspberry Pi 4** (`dymopi.local`, IP 192.168.68.141) — thin USB
+  gateway: solo `gateway.py` su porta 5051. La DYMO è collegata qui.
+
+LXC → POST PNG/media/kind → Pi gateway → CUPS filter chain → /dev/usb/lpN.
+Pipeline ~150 ms.
+
+Frontend HTML/JS vanilla, backend Flask. Repo:
+github.com/alexpani/dymo-web. Vedi `README.md` per dettagli utente.
 
 ## Vincoli di scope (non violarli senza consenso esplicito)
 
@@ -45,14 +51,19 @@ label_render.py     FORMATS (lista preset). render() dispatch tra
                     _fetch_icon() scarica SVG da Iconify e lo converte
                     in PNG via svglib (cache /tmp/dymo-web-icons/).
 
-printing.py         Due path stampa con auto-select:
-                    - DIRECT USB (Linux/Pi): pipe imagetoraster +
-                      raster2dymo[lw|lm] (CUPS filter binaries via
-                      subprocess) e write a /dev/usb/lpN.
-                      Bypassa il backend USB di CUPS. ~istantaneo.
-                    - CUPS lp (macOS dev/staging): subprocess `lp` come
-                      fallback. Auto-detect: se /dev/usb/lp* è scrivibile
-                      → direct, altrimenti lp.
+printing.py         Tre path stampa con auto-select (in ordine):
+                    1. GATEWAY HTTP (LXC): se env DYMO_GATEWAY_URL è set,
+                       POST multipart (kind, media, file=PNG) al Pi
+                       microservice. Default in produzione.
+                    2. DIRECT USB (Linux/Pi monolitico): pipe imagetoraster
+                       + raster2dymo[lw|lm] e write a /dev/usb/lpN.
+                       Bypassa il backend USB di CUPS.
+                    3. CUPS lp (macOS dev): fallback con subprocess `lp`.
+
+gateway.py          Microservice Flask SOLO sul Pi (porta 5051). Single
+                    POST /print endpoint che riceve PNG+kind+media,
+                    fa il filter chain CUPS e scrive a /dev/usb/lpN.
+                    Dipendenze: Flask + waitress (no Pillow/svglib).
 
 presets_store.py    JSON store ~/.config/dymo-web/preset_overrides.json
                     (writable by user — non /etc/dymo-web come la vecchia
@@ -90,22 +101,31 @@ etc/dymo-web.service Unit systemd (committata nel repo, full-recovery.sh
                      la copia in /etc/systemd/system/).
 
 scripts/
-  full-recovery.sh         One-shot per Pi vergine.
+  setup-lxc.sh             Setup LXC: apt deps + venv + pip + systemd
+                           unit con DYMO_GATEWAY_URL puntato al Pi.
+  setup-pi-gateway.sh      Attiva il microservice gateway sul Pi
+                           (Flask+waitress nel venv, systemd unit).
+  setup-pi-autodeploy.sh   Bare repo + post-receive hook + sudoers
+                           NOPASSWD. PARAMETRICO: $1 = nome servizio
+                           da restartare (default 'dymo-web', Pi usa
+                           'dymo-gateway'). Hook salta restart sui
+                           commit che toccano solo data/.
   setup-pi-direct-usb.sh   usblp + udev + gruppo lp + cupsdisable.
-  setup-pi-autodeploy.sh   bare repo + post-receive hook + sudoers
-                           NOPASSWD per restart. Hook salta il restart
-                           quando il commit tocca solo data/.
-  setup-cron-backup.sh     Cron user nightly 03:00 → backup-data.sh.
-  backup-data.sh           Copia ~/.config/dymo-web/*.json in data/,
-                           commit "data: nightly backup …", push github.
+                           Usato dal full-recovery.sh storico.
+  full-recovery.sh         One-shot per un Pi vergine in modalità
+                           monolitica (legacy ma ancora valido).
+  setup-cron-backup.sh,
+  backup-data.sh           Cron+commit+push, modalità monolitica
+                           legacy. Sostituiti dagli snapshot Proxmox
+                           nell'architettura distribuita.
   update-deps.sh           apt install + pip install + restart, dopo
                            un cambio in requirements.txt.
   bench-direct.py          Profilazione filter chain (no stampa fisica).
 
-data/                Snapshot di preset_overrides.json + history.json
-                     committati dal cron backup. Vive su GitHub →
-                     sopravvive a un wipe SD. Ricaricato da
-                     full-recovery.sh in ~/.config/dymo-web/.
+data/                Snapshot legacy dei JSON, riempito dal cron
+                     monolitico. Non usato in modalità LXC: lo stato
+                     vive in ~/.config/dymo-web/ sulla LXC e viene
+                     backuppato tramite snapshot Proxmox.
 ```
 
 ## Lessons learned (gotchas reali)
@@ -199,11 +219,19 @@ viene riavviato perché il diff `oldrev..newrev` è interamente sotto
 `data/`. Se modifichi quel filtro e regredisci, ogni notte il service
 si riavvia inutilmente.
 
-### Cron user, non root
-`scripts/setup-cron-backup.sh` installa nel crontab dell'utente
-(`crontab -e`), non in `/etc/cron.d/`. Logfile: `~/.dymo-web-backup.log`.
-Se cambi a system cron, ricorda di runnare come `alexpani` (PATH, HOME,
-SSH key, git remote).
+### Cron user, non root (modalità legacy)
+`scripts/setup-cron-backup.sh` installa nel crontab utente, non in
+`/etc/cron.d/`. Nell'architettura distribuita LXC+Pi questo NON è
+attivo: i backup li fa Proxmox a livello container. Lo script resta
+nel repo per chi avesse bisogno della modalità Pi monolitica.
+
+### Gateway pattern
+La LXC produce il PNG (con offset/safety/padding già applicati per la
+stampa via `for_print=True`), poi `_print_via_gateway()` costruisce a
+mano un payload multipart (no `requests` dep, solo urllib stdlib),
+POST a `$DYMO_GATEWAY_URL/print`. Il Pi gateway fa il filter chain e
+scrive a `/dev/usb/lpN`. Vedi `printing.py:_print_via_gateway` e
+`gateway.py`.
 
 ### CUPS auto-disable dopo un errore
 Quando un job fallisce, CUPS può disabilitare la stampante e bloccare
@@ -263,18 +291,19 @@ ssh alexpani@dymo.local 'tail -20 ~/.dymo-web-backup.log'
 ```
 edit Mac  →  git push origin main
                       │
-       ┌──────────────┴──────────────┐
-       ▼                             ▼
-   GitHub                  Pi /opt/git/dymo-web.git
-                                    │
-                          post-receive hook:
-                            git pull working-copy
-                            systemctl restart (skip se solo data/)
+        ┌─────────────┼─────────────┐
+        ▼             ▼             ▼
+    GitHub      Pi bare       LXC bare
+                 │                │
+       hook restart        hook restart
+       dymo-gateway         dymo-web
+       (Pi 5051)            (LXC 5050)
 ```
 
-`origin` ha 2 push URL: HTTPS GitHub + SSH Pi. Single command pusha a
-entrambi. Per un push solo a uno specifico: `git push pi main` o
-`git push github main` esistono come remote separati.
+`origin` ha 3 push URL: HTTPS GitHub + SSH Pi (`alexpani@dymopi.local:/opt/git/...`)
++ SSH LXC (`alexpani@dymo.local:/opt/git/...`). Un singolo `git push origin
+main` aggiorna tutti e tre. I due hook sono identici (parametrici sul nome
+del servizio) e saltano il restart sui commit `data:` (legacy).
 
 ## Decisioni out of scope (oggi)
 
@@ -282,8 +311,10 @@ entrambi. Per un push solo a uno specifico: `git push pi main` o
 - Immagini caricate dall'utente (oltre alle icone Iconify)
 - Barcode (oltre al QR)
 - Auth / multi-utente
-- LXC/Proxmox + ESP32 (discusse ma scartate)
-- Migrazione USB diretta tipo libusb/labelle (non serve, direct USB via
-  CUPS filter binaries è già istantaneo)
+- ESP32 (discusso e scartato — driver USB Printer Class custom troppo
+  costoso per il guadagno; il Pi 4 fa già lo stesso lavoro con codice
+  Python ben mantenuto)
+- libusb/labelle/SDK DYMO (non serve, gateway pattern via CUPS filter
+  binaries è già istantaneo)
 
 Quando una di queste serve, l'utente la chiederà esplicitamente.

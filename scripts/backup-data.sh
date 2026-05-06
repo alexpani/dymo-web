@@ -32,3 +32,10 @@ git -c user.email='dymo-web@dymo.local' \
 if git remote get-url github >/dev/null 2>&1; then
     git push github main 2>&1
 fi
+
+# If a local bare repo exists (auto-deploy origin), push there too so the
+# bare doesn't drift behind the working copy. The post-receive hook is
+# wired to skip the service restart for data-only commits.
+if [ -d /opt/git/dymo-web.git ]; then
+    git push file:///opt/git/dymo-web.git main 2>&1
+fi

@@ -1,10 +1,17 @@
 # DYMO Label Web App
 
 Web app personale per stampare etichette su una **DYMO LabelWriter Duo** (USB).
-In produzione gira su un **Raspberry Pi 4** sempre acceso, accessibile da
-qualsiasi browser sulla LAN (Mac, iPhone, ecc.). Frontend HTML + JS vanilla,
-backend Flask, stampa via pipeline diretta a `/dev/usb/lpN` che bypassa il
-backend USB di CUPS (~30 s → istantaneo).
+
+In produzione gira **distribuita su due host** sulla LAN:
+- **LXC Debian su Proxmox** (hostname `dymo.local`) — l'app vera e propria
+  (Flask, render, history, presets, frontend, Iconify).
+- **Raspberry Pi 4** (hostname `dymopi.local`) — thin gateway USB con la
+  DYMO collegata. Solo `gateway.py` (~80 righe Flask) sulla porta 5051.
+
+Quando l'utente preme "Stampa" sul browser, la LXC produce il PNG e fa
+`POST http://dymopi.local:5051/print`; il Pi esegue il filter chain CUPS
+e scrive il bytestream a `/dev/usb/lpN` — pipeline istantanea, nessun
+backend CUPS in mezzo.
 
 Repo: [github.com/alexpani/dymo-web](https://github.com/alexpani/dymo-web)
 
@@ -87,110 +94,128 @@ client (Mac + iPhone) senza dover passare nulla nel payload.
 
 ---
 
-## Workflow di sviluppo
+## Architettura distribuita
 
 ```
-edit su Mac  →  git push origin main
-                       │
-        ┌──────────────┼──────────────┐
-        ▼                             ▼
-   GitHub (backup)            Pi bare repo /opt/git/dymo-web.git
-                                       │
-                                       ▼
-                            post-receive hook:
-                              git pull working-copy
-                              systemctl restart dymo-web
-                              (skip restart se cambia solo data/)
+[Mac/iPhone browser]                   [Mac dev]
+        │                                  │
+        ▼                       git push origin main
+[ http://dymo.local:5050 ]              │
+        │                  ┌─────────────┼──────────────┬───────────────┐
+        ▼                  ▼             ▼              ▼               ▼
+[ LXC: dymo (Debian)   GitHub        Pi bare         LXC bare
+  app principale ]    backup     /opt/git/...      /opt/git/...
+        │              public      hook → restart    hook → restart
+        │                          dymo-gateway      dymo-web
+        │
+   POST /print  PNG + media + kind
+        │
+        ▼
+[ Pi: dymopi (Raspberry Pi 4)
+  http://dymopi.local:5051
+  gateway.py ]
+        │
+        ▼
+imagetoraster | raster2dymo[lw|lm]  →  /dev/usb/lpN  →  📃
 ```
 
-Un singolo `git push origin main` da Mac:
-- aggiorna GitHub
-- triggera l'auto-deploy sul Pi (~2 s)
+**LXC (`dymo.local`)** — l'app principale. Container Debian 13 unprivileged
+su Proxmox. Niente CUPS, niente driver DYMO: la stampa è delegata via HTTP.
+Risorse modeste (CPU < 1% in idle, ~60 MB RAM).
 
----
+**Pi (`dymopi.local`)** — thin gateway USB. Solo `gateway.py` su porta 5051,
+più i pacchetti `cups-filters` + `printer-driver-dymo` per il filter chain.
+Quando arriva il POST /print: PNG → `imagetoraster` → `raster2dymo[lw|lm]`
+→ write a `/dev/usb/lpN`. Pipeline ~150 ms end-to-end.
 
-## Architettura "Direct USB" (Pi)
+**Mac (dev)** — `origin` ha tre push URL: GitHub, Pi bare, LXC bare. Un
+singolo `git push origin main` triggera tre auto-deploy in parallelo
+(GitHub backup, Pi gateway restart se cambia gateway code, LXC dymo-web
+restart se cambia app code; commit `data:` saltano il restart).
 
-```
-PIL render (PNG, ~30 ms)
-    ↓
-imagetoraster (CUPS filter binary, subprocess)  → cups-raster (~30 ms)
-    ↓
-raster2dymolw / raster2dymolm (CUPS filter binary, subprocess)
-                                                → DYMO native bytes (~30 ms)
-    ↓
-write to /dev/usb/lp0 (label) o /dev/usb/lp1 (tape) (~10 ms)
-```
-
-Niente `lp`, niente `cupsd` in mezzo. Le code CUPS DYMO sono `cupsdisable`d
-ma installate, perché ci serve ancora il loro PPD per i filter binari.
-
-Su macOS (dev/staging) c'è un fallback automatico: se `/dev/usb/lp*` non
-esiste o non è scrivibile, `printing.py` usa il classico `lp`.
+Su macOS (dev/staging) `printing.py` ha fallback automatico al classico
+`lp` se né `DYMO_GATEWAY_URL` né `/dev/usb/lp*` sono disponibili.
 
 ---
 
 ## Stack
 
-- **Backend**: Python 3.13 + Flask + waitress
-- **Rendering**: Pillow (300 DPI), `qrcode[pil]`
-- **Icone**: Iconify SVG → PNG via `svglib` + `reportlab` (cache in `/tmp`)
-- **Font**: DejaVu Sans (Pi) / Helvetica.ttc (Mac), selezione per piattaforma
-- **Stampa**: subprocess CUPS filter binaries → `/dev/usb/lpN`
-- **Frontend**: HTML + CSS + JS vanilla in `static/index.html`, no build, no framework
-- **Persistenza**: `~/.config/dymo-web/{preset_overrides,history}.json`
+- **Backend (LXC)**: Python 3.13 + Flask + waitress
+- **Rendering (LXC)**: Pillow (300 DPI), `qrcode[pil]`
+- **Icone (LXC)**: Iconify SVG → PNG via `svglib` + `reportlab` (cache `/tmp`)
+- **Font**: DejaVu Sans (LXC/Pi) / Helvetica.ttc (Mac dev), per piattaforma
+- **Stampa (Pi)**: `gateway.py` (Flask) → CUPS filter binaries → `/dev/usb/lpN`
+- **Frontend**: HTML + CSS + JS vanilla in `static/*.html`, no build, no framework
+- **Persistenza**: `~/.config/dymo-web/{preset_overrides,history}.json` sulla LXC
   + `localStorage` lato browser per il draft dell'editor
-- **Backup**: cron 03:00 → commit `data:` + push GitHub
+- **Backup**: snapshot/replication della LXC gestiti da Proxmox (out of band)
 
 ---
 
-## Setup nuovo Raspberry Pi (da zero)
+## Setup da zero
 
-> Tempo: ~10 min totali. Requisiti: una microSD (≥ 8 GB) e accesso fisico/SSH al Pi.
+### A) LXC su Proxmox (l'app)
 
-### 1. Flash della SD
-- **Raspberry Pi Imager** → "Raspberry Pi OS Lite (64-bit)"
-- Edit settings: hostname `dymo`, username `alexpani`, SSH abilitato (incolla
-  la public key del Mac), Wi-Fi se serve, locale `Europe/Rome`.
-- Flash, inserisci nel Pi, alimenta. Aspetta 90 s al primo boot.
+Prerequisiti: container Debian 12+ unprivileged, IP fisso, hostname `dymo`,
+utente `alexpani` con sudo, SSH abilitato.
 
-### 2. Recovery one-shot
 ```bash
-ssh alexpani@dymo.local
+# Dal Mac, copia la pubkey e clona il repo
+ssh-copy-id alexpani@<lxc-ip>
+ssh alexpani@<lxc-ip> 'git clone https://github.com/alexpani/dymo-web.git ~/dymo-web'
+
+# Dal Mac, lancia il setup (chiede sudo password una volta sulla LXC)
+ssh -t alexpani@<lxc-ip> '~/dymo-web/scripts/setup-lxc.sh dymopi.local'
+```
+
+`setup-lxc.sh <pi-host>` installa: Python+venv, font DejaVu, libcairo dev,
+requirements pip, e crea il systemd unit `dymo-web.service` con
+`Environment=DYMO_GATEWAY_URL=http://<pi-host>:5051`. Niente CUPS, niente
+driver DYMO sulla LXC.
+
+### B) Pi gateway
+
+Prerequisiti: Pi 4 con Pi OS Lite 64-bit, hostname `dymopi`, utente
+`alexpani`, DYMO Duo collegata via USB.
+
+```bash
+# Sul Pi, da zero (recovery script completo)
+ssh alexpani@dymopi.local
 sudo apt-get install -y git
 git clone https://github.com/alexpani/dymo-web.git ~/dymo-web
 ~/dymo-web/scripts/full-recovery.sh
+
+# Quindi attiva il gateway (microservice porta 5051)
+~/dymo-web/scripts/setup-pi-gateway.sh
+
+# Stop l'app monolitica (ridondante con la LXC ora)
+sudo systemctl disable --now dymo-web
 ```
 
-Lo script `full-recovery.sh` ricostruisce TUTTO:
-- pacchetti apt (Python, CUPS, `printer-driver-dymo`, font, libcairo)
-- venv + `pip install -r requirements.txt`
-- code CUPS DYMO (auto-rileva il serial USB della Duo collegata)
-- direct-USB (`usblp` + udev rule + gruppo `lp` + `cupsdisable` delle code)
-- systemd unit (da `etc/dymo-web.service`)
-- bare repo `/opt/git/dymo-web.git` + post-receive hook + sudoers NOPASSWD
-- cron nightly per il backup
-- ripristino di `data/preset_overrides.json` + `data/history.json`
+Il `full-recovery.sh` continua a fare anche il setup full-app (storica,
+utile per scenari senza LXC). Sul gateway-only basta `setup-pi-gateway.sh`.
 
-### 3. Aggiungi il Pi come remote sul Mac
+### C) Auto-deploy dal Mac (triple-push)
+
+Bare repo su Pi e LXC, hook che restartano i rispettivi service:
+
+```bash
+# Una volta, sul Pi (dymo-gateway)
+ssh -t alexpani@dymopi.local '~/dymo-web/scripts/setup-pi-autodeploy.sh dymo-gateway'
+
+# Una volta, sulla LXC (dymo-web)
+ssh -t alexpani@dymo.local '~/dymo-web/scripts/setup-pi-autodeploy.sh dymo-web'
+```
+
+Sul Mac, configura `origin` con tre push URL:
 ```bash
 cd ~/Claude\ Code/dymo-web
-git remote add pi alexpani@dymo.local:/opt/git/dymo-web.git
-# oppure dual-push via origin (consigliato):
+git remote set-url --add --push origin alexpani@dymopi.local:/opt/git/dymo-web.git
 git remote set-url --add --push origin alexpani@dymo.local:/opt/git/dymo-web.git
 ```
 
-### 4. (Opzionale) Backup notturno verso GitHub
-Sul Pi:
-```bash
-ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
-cat ~/.ssh/id_ed25519.pub   # copia su https://github.com/settings/keys
-cd ~/dymo-web && git remote add github git@github.com:alexpani/dymo-web.git
-~/dymo-web/scripts/backup-data.sh   # test manuale
-```
-
-Da qui in avanti il cron alle 03:00 (installato dal recovery script)
-copia i due JSON in `data/`, fa commit, e pusha.
+Da quel momento `git push origin main` aggiorna GitHub + entrambi i
+bare-repo, e i due hook restartano i rispettivi service in parallelo.
 
 ---
 
@@ -228,23 +253,31 @@ compensazione meccanica della stampante, non una modifica del layout).
 
 ---
 
-## Backup automatico + Disaster recovery
+## Backup + Disaster recovery
 
-Stato salvato sul Pi:
-- `~/.config/dymo-web/preset_overrides.json` — taratura per preset
-- `~/.config/dymo-web/history.json` — cronologia con miniature
+Stato vivo sulla LXC: `~/.config/dymo-web/preset_overrides.json` (taratura)
+e `history.json` (cronologia con miniature).
 
-**Ogni notte alle 03:00** (cron utente alexpani):
-1. I due JSON vengono copiati in `~/dymo-web/data/`
-2. Se cambiati: commit `data: nightly backup YYYY-MM-DD HH:MM`
-3. `git push github main`
+**Backup**: gestiti da Proxmox a livello di container (snapshot e
+replication, configurati nella console PVE — niente cron applicativo).
 
-Il post-receive hook **non riavvia il service** quando il commit tocca
-solo `data/` — i backup sono no-op funzionali per l'app.
+**Recovery scenari**:
 
-**Se la SD muore**: reflash + i 4 comandi della sezione "Setup nuovo
-Raspberry Pi" sopra. Il `full-recovery.sh` riapplica anche i
-`data/*.json` salvati nel repo, recuperando calibrazione e cronologia.
+| Cosa muore | Cosa fare | Tempo | Dati persi |
+|---|---|---|---|
+| LXC | Rollback all'ultimo snapshot da Proxmox | ~10 s | ≤ frequenza snapshot |
+| SD del Pi | Reflash + `~/dymo-web/scripts/setup-pi-gateway.sh` | ~5 min | **zero** (sono sulla LXC) |
+| Code corrotto sul Pi | `git push origin main` dal Mac riallinea | <2 s | nessuno |
+| Tutto contemporaneamente | Restore snapshot LXC + reflash + setup Pi | ~10 min | ≤ frequenza snapshot |
+
+Il Pi è completamente stateless: cambia SD, rigenera la chiave SSH,
+relancia gli script di setup, e in pochi minuti torna gateway operativo.
+La LXC ha tutti i dati e Proxmox la backuppa nativamente — non serve nessun
+backup applicativo dentro l'app.
+
+`scripts/backup-data.sh` e `scripts/setup-cron-backup.sh` esistono ancora
+nel repo per chi avesse setup il Pi monolitico storico. Non sono usati
+nell'architettura LXC + Pi gateway.
 
 ---
 
@@ -293,29 +326,35 @@ Per uso permanente, vai sul Pi.
 ## Layout repo
 
 ```
-app.py                 Flask routes + waitress runner
-label_render.py        FORMATS (preset) + render() (label vs tape) + Iconify fetch
-printing.py            Direct USB (Linux) o lp (Mac fallback)
-presets_store.py       JSON store delle override per-preset
-history.py             Ring buffer della cronologia stampe (cap 200)
-requirements.txt       Flask, waitress, Pillow, qrcode, svglib, reportlab, dotenv
+app.py                  Flask app principale (sulla LXC)
+gateway.py              Microservice USB sul Pi (porta 5051, ~80 righe Flask)
+label_render.py         FORMATS + render() + Iconify fetch
+printing.py             Tre path: gateway HTTP > direct-USB > lp (Mac)
+presets_store.py        JSON store delle override per-preset
+history.py              Ring buffer della cronologia stampe (cap 200)
+requirements.txt        Flask, waitress, Pillow, qrcode, svglib, reportlab,
+                        python-dotenv (gateway.py usa solo Flask+waitress)
 
 static/
-  index.html           Tutto il frontend home (HTML+CSS+JS vanilla)
-  presets.html         Pagina /presets per gli override
-  history.html         Pagina /history paginata
+  index.html            Frontend home
+  presets.html          Gestore preset (/presets)
+  history.html          Cronologia paginata (/history)
 
 etc/
-  dymo-web.service     Unit systemd (installata in /etc/systemd/system/ dal recovery)
+  dymo-web.service      Unit dell'app principale (LXC; pure il Pi storico)
+  dymo-gateway.service  Unit del gateway (Pi)
 
 scripts/
-  full-recovery.sh         One-shot setup completo per un Pi nuovo
-  setup-pi-direct-usb.sh   Direct-USB setup (usblp + udev + gruppo lp)
-  setup-pi-autodeploy.sh   Bare repo + post-receive hook + sudoers
-  setup-cron-backup.sh     Cron nightly 03:00
-  backup-data.sh           Copia JSON in data/ + commit + push GitHub
+  setup-lxc.sh             Setup app sulla LXC (deps + venv + systemd)
+  setup-pi-gateway.sh      Attiva il gateway sul Pi (porta 5051)
+  setup-pi-direct-usb.sh   usblp + udev + gruppo lp + cupsdisable
+  setup-pi-autodeploy.sh   Bare repo + post-receive hook + sudoers (parametrico)
+  full-recovery.sh         One-shot completo per un Pi vergine (legacy ma utile)
+  setup-cron-backup.sh     Legacy (cron+GitHub backup); non usato in LXC mode
+  backup-data.sh           Legacy (per setup-cron-backup); non usato in LXC mode
   update-deps.sh           apt + pip dopo cambio requirements
   bench-direct.py          Profilatura della pipeline (no stampa fisica)
 
-data/                  Snapshot dei JSON di stato (commitati dal cron)
+data/                   Snapshot legacy dei JSON (commitati dal cron, in modalità
+                        Pi-monolitica). In modalità LXC il backup lo fa Proxmox.
 ```
