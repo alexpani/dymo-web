@@ -210,9 +210,21 @@ def _layout(runs, max_width, max_height, font_size_pt=None,
                 lines.append([])
             else:
                 lines.extend(_wrap_paragraph(para, max_width, tmp_draw, get_font))
-        f = get_font(False, False)
-        line_h = f.getbbox('Ay')[3] - f.getbbox('Ay')[1]
-        total_h = len(lines) * line_h + max(0, len(lines) - 1) * (line_h * line_spacing)
+        # Per-line visual height = how tall the actual glyphs are. We must
+        # match what _draw_lines does (otherwise the bin search reserves
+        # space for descenders that aren't there and the result drifts off
+        # centre). We use the same _line_visual_geometry helper for both.
+        f_default = get_font(False, False)
+        default_h = f_default.getbbox('Ay')[3] - f_default.getbbox('Ay')[1]
+        line_visual_hs = []
+        for line in lines:
+            if not line:
+                line_visual_hs.append(default_h)
+                continue
+            asc, desc = _line_visual_geometry(line, get_font)
+            line_visual_hs.append((asc + desc) or default_h)
+        total_h = sum(line_visual_hs) + sum(h * line_spacing for h in line_visual_hs[:-1])
+        line_h = max(line_visual_hs) if line_visual_hs else default_h
         max_w = max(
             (sum(tmp_draw.textlength(fr['text'], font=get_font(fr['bold'], fr['italic'])) for fr in line)
              for line in lines if line),
@@ -493,32 +505,52 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
     return img
 
 
+def _line_visual_geometry(line, get_font):
+    """For one line, return (ascent_above_baseline, descent_below_baseline)
+    measured on the actual glyphs (not the font's full ascent/descent metric).
+
+    PIL's font.getbbox(text) returns coords relative to the *ascender top*
+    (anchor 'la'). To convert to baseline-relative we subtract the font's
+    ascent metric:
+        top_above_baseline    = ascent_metric - bbox[1]
+        bottom_below_baseline = bbox[3]       - ascent_metric
+    Either may go negative for unusual glyphs; we take per-fragment max so
+    the line's tallest glyph defines the line height.
+    """
+    asc = desc = 0
+    for fr in line:
+        font = get_font(fr['bold'], fr['italic'])
+        ascent_metric = font.getmetrics()[0]
+        bb = font.getbbox(fr['text'])
+        asc  = max(asc,  ascent_metric - bb[1])
+        desc = max(desc, bb[3] - ascent_metric)
+    return asc, desc
+
+
 def _draw_lines(draw, lines, get_font, text_x, text_y, text_w, text_h, line_h, align, spacing=0.2):
     """
-    Draws each line and centers the whole block vertically based on the
-    *visual* glyph height (not the font's full ascent+descent) so single-line
-    text without descenders doesn't drift towards the bottom.
+    Centre the text block vertically using the *real* glyph extents (not the
+    font's ascender/descender metric), so single-line all-caps text doesn't
+    drift downward and lines with only ascender-less glyphs don't float up.
 
-    Uses anchor='lt' so (x, y) is the exact top-left of the rendered glyph
-    bounding box — independent of font internal padding.
-
-    `spacing` is the extra gap between lines as a fraction of line height
-    (default 0.2 = 20%).
+    Each line's space is (visual_ascent + visual_descent), measured fragment
+    by fragment in _line_visual_geometry. The baseline of each line is then
+    placed so the line's visual top lands exactly at the running y cursor.
     """
-    # Per-line visual height = max bbox height across the line's fragments
-    line_visual_hs = []
+    # Per-line visual geometry, matching _layout's bin search.
+    geos = []
     for line in lines:
-        h = 0
-        for fr in line:
-            f = get_font(fr['bold'], fr['italic'])
-            bbox = f.getbbox(fr['text'])
-            h = max(h, bbox[3] - bbox[1])
-        line_visual_hs.append(h or line_h)
+        if not line:
+            geos.append((line_h, 0))  # placeholder for blank paragraph
+        else:
+            geos.append(_line_visual_geometry(line, get_font))
+    line_visual_hs = [a + d for a, d in geos]
 
     total_h = sum(line_visual_hs) + sum(h * spacing for h in line_visual_hs[:-1])
     y = text_y + max(0, (text_h - total_h) / 2)
 
-    for line, lvh in zip(lines, line_visual_hs):
+    for line, (asc, desc) in zip(lines, geos):
+        lvh = asc + desc
         line_w = sum(draw.textlength(fr['text'], font=get_font(fr['bold'], fr['italic'])) for fr in line)
         if align == 'right':
             x = text_x + text_w - line_w
@@ -526,12 +558,7 @@ def _draw_lines(draw, lines, get_font, text_x, text_y, text_w, text_h, line_h, a
             x = text_x
         else:
             x = text_x + (text_w - line_w) / 2
-        # Baseline-anchor every fragment so glyphs of different heights line up
-        # (anchor='lt' would top-align each fragment to its own bbox, lifting
-        # short letters like 'e' relative to taller ones like 'T'). The baseline
-        # sits at y + max_ascent across the line's fragments.
-        max_ascent = max(get_font(fr['bold'], fr['italic']).getmetrics()[0] for fr in line)
-        baseline_y = y + max_ascent
+        baseline_y = y + asc  # visual top of glyphs = y; baseline = y + ascent
         for fr in line:
             font = get_font(fr['bold'], fr['italic'])
             draw.text((x, baseline_y), fr['text'], fill='black', font=font, anchor='ls')
