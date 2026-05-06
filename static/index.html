@@ -50,6 +50,14 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
+  .sidebar-tools {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+    min-height: 1.6rem;
+  }
   .history-thumbs { display: flex; flex-direction: column; gap: 0.5rem; }
   .thumb {
     position: relative;
@@ -100,9 +108,7 @@
   h1 {
     font-size: 1.4rem;
     margin: 0 0 1rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    line-height: 1.4;
   }
   .settings-link {
     color: var(--muted);
@@ -348,13 +354,7 @@
 <body>
 <div class="layout">
 <div class="container">
-  <h1>
-    <span>🏷️ DYMO Label</span>
-    <span class="header-tools">
-      <span id="printer_dot" class="printer-dot" title="Stato stampante" aria-label="Stato stampante"></span>
-      <a href="/presets" class="settings-link" title="Gestione preset" aria-label="Gestione preset">⚙</a>
-    </span>
-  </h1>
+  <h1>🏷️ DYMO Label</h1>
 
   <div class="card" id="printer_card">
     <label for="printer">Stampante</label>
@@ -463,6 +463,10 @@
 </div>
 
 <aside class="history-sidebar" id="history_sidebar">
+  <div class="sidebar-tools">
+    <span id="printer_dot" class="printer-dot" title="Stato stampante" aria-label="Stato stampante"></span>
+    <a href="/presets" class="settings-link" title="Gestione preset" aria-label="Gestione preset">⚙</a>
+  </div>
   <h2>Recenti</h2>
   <div class="history-thumbs" id="history_thumbs"></div>
   <a href="/history" class="see-all">Vedi tutto →</a>
