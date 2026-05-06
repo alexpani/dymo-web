@@ -32,7 +32,6 @@ FORMATS = [
     # platform.system() for the few cases where the PPDs disagree on names.
     {'name': '89 × 36 mm (Address, 99012)',         'width_mm': 89, 'height_mm': 36, 'code': '99012', 'cups_media': {'Darwin': 'w101h252', 'Linux': 'w102h252.1'}, 'kind': 'label'},
     {'name': '57 × 32 mm (Multipurpose, 11354)',    'width_mm': 57, 'height_mm': 32, 'code': '11354', 'cups_media': 'w162h90', 'kind': 'label', 'is_default': True},
-    {'name': '32 × 57 mm (Multipurpose vertical, 11354)', 'width_mm': 32, 'height_mm': 57, 'code': '11354', 'cups_media': 'w162h90', 'kind': 'label'},
     {'name': '89 × 28 mm (Address Small, 99010)',   'width_mm': 89, 'height_mm': 28, 'code': '99010', 'cups_media': {'Darwin': 'w81h252',  'Linux': 'w79h252.2'}, 'kind': 'label'},
     {'name': '102 × 54 mm (Shipping, 99014)',       'width_mm': 102,'height_mm': 54, 'code': '99014', 'cups_media': 'w154h286.2', 'kind': 'label'},
     {'name': '59 × 190 mm (LeverArch, 99019)',      'width_mm': 59, 'height_mm': 190,'code': '99019', 'cups_media': 'Custom.59x190mm', 'kind': 'label'},
@@ -198,7 +197,7 @@ def render(fmt, runs=None,
            align='center', font_size_pt=None,
            auto_fit_safety=0.0, padding_mm=2.0, line_spacing=0.2,
            offset_x_mm=0.0, offset_y_mm=0.0,
-           text='', bold=False, italic=False,
+           text='', bold=False, italic=False, orientation='horizontal',
            # legacy aliases (older clients / curl scripts):
            qr_enabled=False, qr_position=None):
     """
@@ -214,9 +213,15 @@ def render(fmt, runs=None,
     runs:            list of {text, bold, italic}; '\\n' splits paragraphs
     align:           text alignment within its area
     font_size_pt:    int forced size, or None for auto-fit
+    orientation:     'horizontal' (default) or 'vertical' — when vertical the
+                     content is laid out on a swapped canvas (height × width)
+                     and rotated 90° before output, so the printed paper
+                     stays the same physical size but the text reads sideways.
     """
     if not runs:
         runs = [{'text': text, 'bold': bold, 'italic': italic}]
+    if orientation == 'vertical' and fmt.get('kind') != 'tape':
+        fmt = {**fmt, 'width_mm': fmt['height_mm'], 'height_mm': fmt['width_mm']}
 
     # Backward-compat: map old qr_enabled/qr_position to new decor params
     if decor == 'none' and qr_enabled and qr_content:
@@ -230,6 +235,9 @@ def render(fmt, runs=None,
     else:
         img = _render_label(fmt, runs, decor, qr_content, icon_id, decor_position,
                             align, font_size_pt, auto_fit_safety, padding_mm, line_spacing)
+    if orientation == 'vertical' and fmt.get('kind') != 'tape':
+        # Rotate so the swapped canvas matches the physical paper size again.
+        img = img.rotate(-90, expand=True)
     return _apply_offset(img, offset_x_mm, offset_y_mm)
 
 

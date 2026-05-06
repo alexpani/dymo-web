@@ -424,6 +424,18 @@
           </svg>
         </button>
       </div>
+      <div class="seg-group" id="orientation_group" title="Orientamento etichetta">
+        <button class="seg active" data-orient="horizontal" title="Orizzontale" aria-label="Orizzontale">
+          <svg viewBox="0 0 18 12" width="18" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="1" y="1" width="16" height="10" rx="1.5"/>
+          </svg>
+        </button>
+        <button class="seg" data-orient="vertical" title="Verticale (ruota testo 90°)" aria-label="Verticale">
+          <svg viewBox="0 0 12 18" width="12" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="1" y="1" width="10" height="16" rx="1.5"/>
+          </svg>
+        </button>
+      </div>
     </div>
 
     <div class="size-row">
@@ -586,7 +598,7 @@ async function loadFormats() {
   if (fmt) selectPrinterFor(fmt.kind || 'label');
 }
 
-const state = { align: 'center', decor: 'none', icon_id: '' };
+const state = { align: 'center', orientation: 'horizontal', decor: 'none', icon_id: '' };
 let iconSearchTimer = null;
 
 function extractRuns(root) {
@@ -648,6 +660,7 @@ function getPayload() {
     icon_id: state.icon_id,
     decor_position: $('decor_position').value,
     align: state.align,
+    orientation: state.orientation,
     font_size_pt: sliderVal > 0 ? sliderVal : null,
     line_spacing: parseInt($('line_spacing').value, 10) / 100,
   };
@@ -706,6 +719,7 @@ function saveDraftLocal() {
       icon_id:        state.icon_id,
       decor_position: $('decor_position').value,
       align:          state.align,
+      orientation:    state.orientation,
       font_size_pt:   parseInt($('font_size').value, 10),
       line_spacing:   parseInt($('line_spacing').value, 10),
     };
@@ -737,6 +751,9 @@ function loadDraftLocal() {
     state.align = d.align || 'center';
     $('align_group').querySelectorAll('.seg').forEach(b =>
       b.classList.toggle('active', b.dataset.align === state.align));
+    state.orientation = d.orientation || 'horizontal';
+    $('orientation_group').querySelectorAll('.seg').forEach(b =>
+      b.classList.toggle('active', b.dataset.orient === state.orientation));
     $('font_size').value = d.font_size_pt || 0;
     syncFontSizeUI();
     const ls = (d.line_spacing != null ? d.line_spacing : 20);
@@ -757,6 +774,9 @@ function resetEditor() {
   state.align = 'center';
   $('align_group').querySelectorAll('.seg').forEach(b =>
     b.classList.toggle('active', b.dataset.align === 'center'));
+  state.orientation = 'horizontal';
+  $('orientation_group').querySelectorAll('.seg').forEach(b =>
+    b.classList.toggle('active', b.dataset.orient === 'horizontal'));
   $('font_size').value = 0;
   syncFontSizeUI();
   $('line_spacing').value = 20;
@@ -942,6 +962,15 @@ $('align_group').querySelectorAll('.seg').forEach(btn => {
   btn.addEventListener('click', () => {
     state.align = btn.dataset.align;
     $('align_group').querySelectorAll('.seg').forEach(b =>
+      b.classList.toggle('active', b === btn)
+    );
+    schedulePreview();
+  });
+});
+$('orientation_group').querySelectorAll('.seg').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.orientation = btn.dataset.orient;
+    $('orientation_group').querySelectorAll('.seg').forEach(b =>
       b.classList.toggle('active', b === btn)
     );
     schedulePreview();

@@ -60,6 +60,7 @@ def _render_kwargs(data, for_print=False):
         'bold': data.get('bold', False),
         'italic': data.get('italic', False),
         'align': data.get('align', 'center'),
+        'orientation': data.get('orientation', 'horizontal'),
         'font_size_pt': data.get('font_size_pt') or None,
         'line_spacing': data.get('line_spacing') if data.get('line_spacing') is not None else 0.2,
         # per-preset overrides (server-side authoritative)
