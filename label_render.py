@@ -35,6 +35,7 @@ FORMATS = [
     {'name': '32 × 57 mm (Multipurpose vertical, 11354)', 'width_mm': 32, 'height_mm': 57, 'code': '11354', 'cups_media': 'w162h90', 'kind': 'label'},
     {'name': '89 × 28 mm (Address Small, 99010)',   'width_mm': 89, 'height_mm': 28, 'code': '99010', 'cups_media': {'Darwin': 'w81h252',  'Linux': 'w79h252.2'}, 'kind': 'label'},
     {'name': '102 × 54 mm (Shipping, 99014)',       'width_mm': 102,'height_mm': 54, 'code': '99014', 'cups_media': 'w154h286.2', 'kind': 'label'},
+    {'name': '59 × 190 mm (LeverArch, 99019)',      'width_mm': 59, 'height_mm': 190,'code': '99019', 'cups_media': 'Custom.59x190mm', 'kind': 'label'},
     {'name': '51 × 19 mm (Multipurpose, 11355)',    'width_mm': 51, 'height_mm': 19, 'code': '11355', 'cups_media': 'w54h144',    'kind': 'label'},
     {'name': '25 × 25 mm (Multipurpose, 11353)',    'width_mm': 25, 'height_mm': 25, 'code': '11353', 'cups_media': 'w72h72',     'kind': 'label'},
     # Continuous D1 tape (DYMO_LabelWriter_DUO_Tape_*). width_mm = tape width,
