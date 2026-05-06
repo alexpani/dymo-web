@@ -454,6 +454,7 @@
 
   <div class="card">
     <div class="action-row">
+      <button class="secondary" id="reset_btn" title="Cancella editor e cursori">Reset</button>
       <button class="primary" id="print_btn">Stampa</button>
       <button class="secondary" id="draft_btn" title="Salva nella cronologia senza stampare">Salva bozza</button>
     </div>
@@ -660,7 +661,83 @@ async function updatePreview() {
 
 function schedulePreview() {
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(updatePreview, 300);
+  debounceTimer = setTimeout(() => { updatePreview(); saveDraftLocal(); }, 300);
+}
+
+// ── Draft persistence (per-browser localStorage) ────────────────────────
+const DRAFT_KEY = 'dymo-web:draft';
+
+function saveDraftLocal() {
+  try {
+    const draft = {
+      text_html:      $('text').innerHTML,
+      format:         parseInt($('format').value, 10),
+      decor:          state.decor,
+      qr_content:     $('qr_content').value,
+      icon_id:        state.icon_id,
+      decor_position: $('decor_position').value,
+      align:          state.align,
+      font_size_pt:   parseInt($('font_size').value, 10),
+      line_spacing:   parseInt($('line_spacing').value, 10),
+    };
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch (e) {}
+}
+
+function loadDraftLocal() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    if (typeof d.format === 'number') {
+      $('format').value = d.format;
+      const fmt = formats[d.format];
+      if (fmt) selectPrinterFor(fmt.kind || 'label');
+    }
+    $('text').innerHTML = d.text_html || '';
+    setDecorMode(d.decor || 'none');
+    $('qr_content').value = d.qr_content || '';
+    $('decor_position').value = d.decor_position || 'left';
+    state.icon_id = d.icon_id || '';
+    if (state.icon_id) {
+      $('icon_chosen_id').textContent = state.icon_id;
+      $('icon_chosen').hidden = false;
+    } else {
+      $('icon_chosen').hidden = true;
+    }
+    state.align = d.align || 'center';
+    $('align_group').querySelectorAll('.seg').forEach(b =>
+      b.classList.toggle('active', b.dataset.align === state.align));
+    $('font_size').value = d.font_size_pt || 0;
+    syncFontSizeUI();
+    const ls = (d.line_spacing != null ? d.line_spacing : 20);
+    $('line_spacing').value = ls;
+    $('line_spacing_label').textContent = ls + '%';
+    return true;
+  } catch (e) { return false; }
+}
+
+function resetEditor() {
+  localStorage.removeItem(DRAFT_KEY);
+  $('text').textContent = '';
+  setDecorMode('none');
+  $('qr_content').value = '';
+  state.icon_id = '';
+  $('icon_chosen').hidden = true;
+  $('decor_position').value = 'left';
+  state.align = 'center';
+  $('align_group').querySelectorAll('.seg').forEach(b =>
+    b.classList.toggle('active', b.dataset.align === 'center'));
+  $('font_size').value = 0;
+  syncFontSizeUI();
+  $('line_spacing').value = 20;
+  $('line_spacing_label').textContent = '20%';
+  const def = formats.find(f => f.is_default);
+  if (def) {
+    $('format').value = def.index;
+    selectPrinterFor(def.kind || 'label');
+  }
+  updatePreview();
 }
 
 async function doPrint() {
@@ -768,6 +845,7 @@ $('icon_search').addEventListener('input', () => {
   iconSearchTimer = setTimeout(() => searchIcons($('icon_search').value.trim()), 300);
 });
 $('print_btn').addEventListener('click', doPrint);
+$('reset_btn').addEventListener('click', resetEditor);
 
 async function saveDraft() {
   const btn = $('draft_btn');
@@ -886,7 +964,7 @@ function applyPayload(payload) {
 
 async function loadHistory() {
   try {
-    const res = await fetch('/api/history?limit=5');
+    const res = await fetch('/api/history?limit=8');
     const data = await res.json();
     renderHistory(data.items || []);
   } catch (e) {
@@ -926,7 +1004,8 @@ function renderHistory(items) {
 // Init
 (async () => {
   await Promise.all([loadPrinters(), loadFormats()]);
-  // Replay from /history page (?id stored in sessionStorage)
+  // Priority: replay from /history (sessionStorage), then localStorage draft,
+  // then a friendly default "Test" string.
   const replayId = sessionStorage.getItem('replay_id');
   if (replayId) {
     sessionStorage.removeItem('replay_id');
@@ -935,12 +1014,15 @@ function renderHistory(items) {
       if (res.ok) {
         const item = await res.json();
         applyPayload(item.payload);
+        saveDraftLocal();
         loadHistory();
         return;
       }
     } catch (e) {}
   }
-  $('text').textContent = 'Test';
+  if (!loadDraftLocal()) {
+    $('text').textContent = 'Test';
+  }
   updatePreview();
   loadHistory();
 })();
