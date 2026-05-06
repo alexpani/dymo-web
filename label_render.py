@@ -463,8 +463,14 @@ def _draw_lines(draw, lines, get_font, text_x, text_y, text_w, text_h, line_h, a
             x = text_x
         else:
             x = text_x + (text_w - line_w) / 2
+        # Baseline-anchor every fragment so glyphs of different heights line up
+        # (anchor='lt' would top-align each fragment to its own bbox, lifting
+        # short letters like 'e' relative to taller ones like 'T'). The baseline
+        # sits at y + max_ascent across the line's fragments.
+        max_ascent = max(get_font(fr['bold'], fr['italic']).getmetrics()[0] for fr in line)
+        baseline_y = y + max_ascent
         for fr in line:
             font = get_font(fr['bold'], fr['italic'])
-            draw.text((x, y), fr['text'], fill='black', font=font, anchor='lt')
+            draw.text((x, baseline_y), fr['text'], fill='black', font=font, anchor='ls')
             x += draw.textlength(fr['text'], font=font)
         y += lvh * (1 + spacing)
