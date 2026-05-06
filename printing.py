@@ -127,9 +127,11 @@ def _print_direct(cfg, image, media):
         png_path = png_tmp.name
 
     try:
-        # fit-to-page tells imagetoraster to scale the bitmap to the media size
-        # (otherwise a 1-2 px mismatch can spill onto a second label).
-        opts = f"media={media} PageSize={media} fit-to-page"
+        # No fit-to-page: the PNG is rendered at the exact imageable-area
+        # size on the app side (label_render.imageable_size_mm), so any
+        # scaling here would just introduce asymmetric distortion and ruin
+        # centring. The bitmap goes into the imageable area as-is.
+        opts = f"media={media} PageSize={media}"
         cups_raster = _run_filter(
             [IMAGETORASTER, '1', os.environ.get('USER', 'web'), 'dymo-web', '1', opts],
             _filter_env(cfg['ppd'], 'image/png'),
@@ -207,7 +209,9 @@ def _print_via_gateway(image, kind, media):
 
 # ── CUPS lp fallback ──────────────────────────────────────────────────────────
 def _print_via_lp(printer_name, image, fmt, media):
-    extra = [] if fmt.get('kind') == 'tape' else ['-o', 'fit-to-page']
+    # PNG is already rendered at imageable-area size; no fit-to-page so the
+    # printer doesn't re-scale and decentre the content.
+    extra = []
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
         image.save(tmp.name, format='PNG')
         path = tmp.name

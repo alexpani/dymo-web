@@ -101,7 +101,10 @@ def print_label():
         png_path = tmp.name
 
     try:
-        opts = f"media={media} PageSize={media} fit-to-page"
+        # No fit-to-page: the PNG arrives already sized to the imageable area
+        # by the app (label_render.imageable_size_mm). Any scaling here would
+        # just distort and decentre the bitmap.
+        opts = f"media={media} PageSize={media}"
         cups_raster = _run_filter(
             [IMAGETORASTER, '1', os.environ.get('USER', 'gateway'), 'dymo', '1', opts],
             _filter_env(cfg['ppd'], 'image/png'),

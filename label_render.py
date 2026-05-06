@@ -34,7 +34,7 @@ FORMATS = [
     {'name': '57 × 32 mm (Multipurpose, 11354)',    'width_mm': 57, 'height_mm': 32, 'code': '11354', 'cups_media': 'w162h90', 'kind': 'label', 'is_default': True},
     {'name': '89 × 28 mm (Address Small, 99010)',   'width_mm': 89, 'height_mm': 28, 'code': '99010', 'cups_media': {'Darwin': 'w81h252',  'Linux': 'w79h252.2'}, 'kind': 'label'},
     {'name': '102 × 54 mm (Shipping, 99014)',       'width_mm': 102,'height_mm': 54, 'code': '99014', 'cups_media': 'w154h286.2', 'kind': 'label'},
-    {'name': '59 × 190 mm (LeverArch, 99019)',      'width_mm': 59, 'height_mm': 190,'code': '99019', 'cups_media': 'Custom.59x190mm', 'kind': 'label'},
+    {'name': '59 × 190 mm (LeverArch, 99019)',      'width_mm': 59, 'height_mm': 190,'code': '99019', 'cups_media': 'w167h539', 'kind': 'label'},
     {'name': '51 × 19 mm (Multipurpose, 11355)',    'width_mm': 51, 'height_mm': 19, 'code': '11355', 'cups_media': 'w54h144',    'kind': 'label'},
     {'name': '25 × 25 mm (Multipurpose, 11353)',    'width_mm': 25, 'height_mm': 25, 'code': '11353', 'cups_media': 'w72h72',     'kind': 'label'},
     # Continuous D1 tape (DYMO_LabelWriter_DUO_Tape_*). width_mm = tape width,
@@ -58,6 +58,52 @@ DPI = 300
 
 def mm_to_px(mm):
     return int((mm / 25.4) * DPI)
+
+
+# ── PPD imageable area (in mm) ────────────────────────────────────────────────
+# Values read from /etc/cups/ppd/DYMO_LabelWriter_DUO_Label.ppd on the Pi.
+# Tuple is (left, top, right, bottom). For pre-cut labels DYMO leaves a sizeable
+# top margin (~5-6 mm) to account for the leading-edge sensor; bottom is ~1.5 mm.
+# Used to: (a) render the PNG at exact imageable size so the printer doesn't
+# scale it (no fit-to-page), and (b) compute an automatic offset that puts the
+# logical centre of the content at the *physical* centre of the label.
+PPD_IMAGEABLE_MARGINS_MM = {
+    'w162h90':    (1.016, 1.524, 1.016, 1.524),  # 11354 Multi-Purpose 57×32 (symmetric)
+    'w154h286.2': (1.524, 5.42,  1.016, 1.524),  # 99014 Shipping 102×54
+    'w102h252.1': (1.524, 5.67,  1.016, 1.524),  # 99012 Large Address 89×36
+    'w101h252':   (1.524, 5.67,  1.016, 1.524),  # 99012 macOS PPD name
+    'w79h252.2':  (1.524, 5.84,  1.016, 1.524),  # 99010 Standard Address 89×28
+    'w81h252':    (1.524, 5.84,  1.016, 1.524),  # 99010 macOS PPD name
+    'w54h144':    (1.439, 5.76,  1.016, 1.524),  # 11355 Multi-Purpose 51×19
+    'w72h72':     (1.439, 2.37,  1.016, 1.524),  # 11353 Multi-Purpose 25×25
+    'w167h539':   (1.439, 5.59,  1.016, 1.524),  # 99019 Large Lever Arch 59×190
+}
+DEFAULT_IMAGEABLE_MARGINS_MM = (1.0, 1.5, 1.0, 1.5)  # safe DYMO label default
+
+
+def get_imageable_margins_mm(fmt):
+    """Return (left, top, right, bottom) in mm for this preset's media."""
+    if fmt.get('imageable_margins_mm'):
+        m = fmt['imageable_margins_mm']
+        if isinstance(m, (list, tuple)) and len(m) == 4:
+            return tuple(float(x) for x in m)
+    media = resolve_cups_media(fmt) or ''
+    return PPD_IMAGEABLE_MARGINS_MM.get(media, DEFAULT_IMAGEABLE_MARGINS_MM)
+
+
+def imageable_size_mm(fmt):
+    """Return (w_mm, h_mm) = paper minus the printer's hardware margins."""
+    L, T, R, B = get_imageable_margins_mm(fmt)
+    return (max(1.0, fmt['width_mm'] - L - R),
+            max(1.0, fmt['height_mm'] - T - B))
+
+
+def centring_offset_mm(fmt):
+    """Return (dx_mm, dy_mm) needed to push the logical centre of an
+    imageable-sized canvas onto the *physical* centre of the paper.
+    For symmetric margins this is (0, 0)."""
+    L, T, R, B = get_imageable_margins_mm(fmt)
+    return ((L - R) / 2.0, (T - B) / 2.0)
 
 
 def _load_font(size, bold=False, italic=False):
@@ -220,8 +266,6 @@ def render(fmt, runs=None,
     """
     if not runs:
         runs = [{'text': text, 'bold': bold, 'italic': italic}]
-    if orientation == 'vertical' and fmt.get('kind') != 'tape':
-        fmt = {**fmt, 'width_mm': fmt['height_mm'], 'height_mm': fmt['width_mm']}
 
     # Backward-compat: map old qr_enabled/qr_position to new decor params
     if decor == 'none' and qr_enabled and qr_content:
@@ -229,14 +273,24 @@ def render(fmt, runs=None,
     if qr_position and decor_position == 'left':
         decor_position = qr_position
 
+    is_vertical = orientation == 'vertical' and fmt.get('kind') != 'tape'
+
     if fmt.get('kind') == 'tape':
         img = _render_tape(fmt, runs, align, font_size_pt,
                            auto_fit_safety, padding_mm, line_spacing)
     else:
-        img = _render_label(fmt, runs, decor, qr_content, icon_id, decor_position,
+        # Render at the imageable size (paper minus PPD hardware margins),
+        # so the print pipeline can ship the PNG as-is — no fit-to-page,
+        # no asymmetric scaling. The driver places the bitmap inside the
+        # imageable area and the PPD's hardware margins do the rest.
+        i_w, i_h = imageable_size_mm(fmt)
+        if is_vertical:
+            i_w, i_h = i_h, i_w
+        fmt_eff = {**fmt, 'width_mm': i_w, 'height_mm': i_h}
+        img = _render_label(fmt_eff, runs, decor, qr_content, icon_id, decor_position,
                             align, font_size_pt, auto_fit_safety, padding_mm, line_spacing)
-    if orientation == 'vertical' and fmt.get('kind') != 'tape':
-        # Rotate so the swapped canvas matches the physical paper size again.
+
+    if is_vertical:
         img = img.rotate(-90, expand=True)
     return _apply_offset(img, offset_x_mm, offset_y_mm)
 

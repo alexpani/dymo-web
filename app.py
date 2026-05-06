@@ -6,7 +6,7 @@ import urllib.parse
 from flask import Flask, jsonify, request, send_from_directory
 from waitress import serve
 from dotenv import load_dotenv
-from label_render import render, resolve_cups_media
+from label_render import render, resolve_cups_media, centring_offset_mm
 from printing import list_printers, print_label
 import presets_store
 import presets_catalog
@@ -46,6 +46,12 @@ def _render_kwargs(data, for_print=False):
         fmt_index = 0
     fmt = presets[fmt_index]
     overrides = presets_store.get(fmt['name'])
+    # Auto-centring: shift the printed bitmap so that its centre lands on the
+    # *physical* centre of the label, compensating for the PPD's asymmetric
+    # hardware margins (DYMO leaves ~5-6 mm at the top, ~1.5 mm at the bottom
+    # for the leading-edge sensor). Only at print time; previews stay centred
+    # on the imageable area so what you see is what's between the margins.
+    cx_auto, cy_auto = centring_offset_mm(fmt)
     return {
         'fmt': fmt,
         'runs': data.get('runs'),
@@ -66,8 +72,8 @@ def _render_kwargs(data, for_print=False):
         # per-preset overrides (server-side authoritative)
         'auto_fit_safety': overrides['auto_fit_safety'],
         'padding_mm':      overrides['padding_mm'],
-        'offset_x_mm':     overrides['offset_x_mm'] if for_print else 0.0,
-        'offset_y_mm':     overrides['offset_y_mm'] if for_print else 0.0,
+        'offset_x_mm':     (overrides['offset_x_mm'] + cx_auto) if for_print else 0.0,
+        'offset_y_mm':     (overrides['offset_y_mm'] + cy_auto) if for_print else 0.0,
     }
 
 @app.route('/api/preview', methods=['POST'])
