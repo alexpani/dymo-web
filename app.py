@@ -189,26 +189,43 @@ def api_history_delete(entry_id):
 # for a label.
 ANIMATED_SETS = {'line-md', 'svg-spinners'}
 
+# Curated, well-maintained monochrome sets — shown first in search results.
+# Order matters: lower index = higher rank.
+POPULAR_SETS = [
+    'lucide', 'tabler', 'mdi', 'material-symbols', 'ph', 'phosphor',
+    'heroicons', 'solar', 'ri', 'ic', 'carbon', 'fluent', 'bx',
+    'octicon', 'feather', 'akar-icons',
+]
+POPULAR_RANK = {p: i for i, p in enumerate(POPULAR_SETS)}
+
 
 @app.route('/api/icons/search')
 def icons_search():
     """Proxy to https://api.iconify.design/search.
 
-    Drops icons that wouldn't print well on a monochrome thermal printer:
-    - colorful sets (emoji, flag, flat-color): identified via Iconify's
-      'palette' flag in the per-collection metadata
-    - animated sets: hard-coded blacklist (Iconify has no 'animated' tag)
+    - Drops colorful sets (palette=True) and known animated sets — they
+      don't print well on a monochrome thermal printer.
+    - Optional 'prefix' query param to limit to a single Iconify set.
+    - Results are stably sorted: well-known sets (POPULAR_SETS) first in
+      curated order, then the rest in Iconify's original ranking.
     """
     q = (request.args.get('q') or '').strip()
     if not q:
         return jsonify({'icons': []})
     limit = min(int(request.args.get('limit', 64)), 999)
-    url = f'https://api.iconify.design/search?query={urllib.parse.quote(q)}&limit={limit}'
+    prefix_filter = (request.args.get('prefix') or '').strip()
+
+    qs = {'query': q, 'limit': str(limit)}
+    if prefix_filter:
+        qs['prefix'] = prefix_filter
+    url = 'https://api.iconify.design/search?' + urllib.parse.urlencode(qs)
+
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'dymo-web/1.0'})
         with urllib.request.urlopen(req, timeout=5) as r:
             data = json.loads(r.read().decode())
         collections = data.get('collections', {})
+
         def keep(icon_id):
             if ':' not in icon_id:
                 return False
@@ -218,7 +235,12 @@ def icons_search():
             if collections.get(prefix, {}).get('palette'):
                 return False
             return True
-        return jsonify({'icons': [ic for ic in data.get('icons', []) if keep(ic)]})
+
+        icons = [ic for ic in data.get('icons', []) if keep(ic)]
+        # Stable sort by (popularity rank, original order)
+        order = {ic: i for i, ic in enumerate(icons)}
+        icons.sort(key=lambda ic: (POPULAR_RANK.get(ic.split(':', 1)[0], 9999), order[ic]))
+        return jsonify({'icons': icons, 'popular_sets': POPULAR_SETS})
     except Exception as e:
         return jsonify({'icons': [], 'error': str(e)}), 502
 

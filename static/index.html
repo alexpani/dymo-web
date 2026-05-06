@@ -300,17 +300,25 @@
   .toggle-btn:hover:not(.active):not(:disabled) { background: #f0f0f3; }
   .toggle-btn:disabled { opacity: 0.4; cursor: default; }
   .decor-row { display: flex; align-items: center; }
+  .icon-search-row {
+    display: flex; gap: 0.4rem; align-items: stretch;
+  }
+  .icon-search-row input { flex: 1; }
+  .icon-search-row select {
+    width: auto; padding: 0.4rem 0.5rem;
+    font-size: 0.9rem;
+  }
   .icon-grid {
     display: grid;
-    grid-template-columns: repeat(8, 1fr);
+    grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
     gap: 4px;
     margin-top: 0.5rem;
-    max-height: 12rem;
+    max-height: 16rem;
     overflow-y: auto;
     padding: 4px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    min-height: 3rem;
+    min-height: 4rem;
   }
   .icon-grid:empty::before {
     content: 'Digita per cercare…';
@@ -324,18 +332,23 @@
     background: white;
     border: 1px solid transparent;
     border-radius: 6px;
-    padding: 4px;
+    padding: 4px 2px;
     cursor: pointer;
-    aspect-ratio: 1 / 1;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
+    gap: 2px;
+    overflow: hidden;
   }
   .icon-grid button:hover { background: #f0f0f3; }
   .icon-grid button.selected { border-color: var(--accent); background: #e8f0fe; }
-  .icon-grid img { width: 22px; height: 22px; }
-  @media (max-width: 480px) {
-    .icon-grid { grid-template-columns: repeat(6, 1fr); }
+  .icon-grid img { width: 32px; height: 32px; }
+  .icon-grid .set {
+    font-size: 0.62rem; color: var(--muted);
+    width: 100%; text-align: center;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    line-height: 1.1;
   }
   .size-row {
     display: flex;
@@ -440,7 +453,12 @@
     </div>
 
     <div id="decor_icon" class="decor-pane" hidden style="margin-top: 0.6rem;">
-      <input type="text" id="icon_search" placeholder="Cerca un'icona (es. 'home', 'wifi'...)">
+      <div class="icon-search-row">
+        <input type="text" id="icon_search" placeholder="Cerca un'icona (es. 'home', 'wifi'...)">
+        <select id="icon_set_filter" title="Filtra per set">
+          <option value="">Tutti i set</option>
+        </select>
+      </div>
       <div id="icon_results" class="icon-grid"></div>
       <div id="icon_chosen" hidden style="margin-top: 0.4rem; font-size: 0.85rem; color: var(--muted);">
         <span>Scelta:</span> <strong id="icon_chosen_id"></strong>
@@ -823,19 +841,24 @@ $('decor_position').addEventListener('change', schedulePreview);
 async function searchIcons(q) {
   const grid = $('icon_results');
   if (!q || q.length < 2) { grid.innerHTML = ''; return; }
+  const setFilter = $('icon_set_filter').value;
+  const params = new URLSearchParams({ q, limit: '200' });
+  if (setFilter) params.set('prefix', setFilter);
   try {
-    const res = await fetch('/api/icons/search?q=' + encodeURIComponent(q) + '&limit=200');
+    const res = await fetch('/api/icons/search?' + params);
     const data = await res.json();
+    populateSetFilter(data.popular_sets);
     grid.innerHTML = '';
     (data.icons || []).forEach(id => {
+      const set = id.split(':', 1)[0];
       const btn = document.createElement('button');
       btn.title = id;
       btn.dataset.iconId = id;
       if (id === state.icon_id) btn.classList.add('selected');
-      const img = document.createElement('img');
-      img.src = 'https://api.iconify.design/' + id + '.svg?color=%23000';
-      img.alt = id;
-      btn.appendChild(img);
+      btn.innerHTML = `
+        <img src="https://api.iconify.design/${id}.svg?color=%23000" alt="">
+        <div class="set">${set}</div>
+      `;
       btn.addEventListener('click', () => {
         state.icon_id = id;
         $('icon_chosen_id').textContent = id;
@@ -851,10 +874,25 @@ async function searchIcons(q) {
     grid.innerHTML = '<div style="grid-column:1/-1; color:var(--err); font-size:0.85rem;">Errore ricerca</div>';
   }
 }
+
+let setFilterPopulated = false;
+function populateSetFilter(popular) {
+  if (setFilterPopulated || !popular) return;
+  const sel = $('icon_set_filter');
+  popular.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p;
+    opt.textContent = p;
+    sel.appendChild(opt);
+  });
+  setFilterPopulated = true;
+}
+
 $('icon_search').addEventListener('input', () => {
   clearTimeout(iconSearchTimer);
   iconSearchTimer = setTimeout(() => searchIcons($('icon_search').value.trim()), 300);
 });
+$('icon_set_filter').addEventListener('change', () => searchIcons($('icon_search').value.trim()));
 $('print_btn').addEventListener('click', doPrint);
 $('reset_btn').addEventListener('click', resetEditor);
 
