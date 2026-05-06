@@ -189,14 +189,20 @@ def api_history_delete(entry_id):
 # for a label.
 ANIMATED_SETS = {'line-md', 'svg-spinners'}
 
-# Curated, well-maintained monochrome sets — shown first in search results.
-# Order matters: lower index = higher rank.
+# Curated, well-maintained monochrome sets — these are the ONLY sets the
+# search returns, so the user gets clean results instead of niche/decorative
+# collections (streamline, twemoji, etc.).
+# Order matters: lower index = higher rank in the result list.
 POPULAR_SETS = [
     'lucide', 'tabler', 'mdi', 'material-symbols', 'ph', 'phosphor',
     'heroicons', 'solar', 'ri', 'ic', 'carbon', 'fluent', 'bx',
     'octicon', 'feather', 'akar-icons',
 ]
 POPULAR_RANK = {p: i for i, p in enumerate(POPULAR_SETS)}
+
+# Substrings in the icon name that mark visually busy variants we don't want
+# (Solar/Phosphor publish many of these alongside the plain version).
+FANCY_NAME_PARTS = ('duotone', 'two-tone', 'twotone', 'broken')
 
 
 @app.route('/api/icons/search')
@@ -229,10 +235,17 @@ def icons_search():
         def keep(icon_id):
             if ':' not in icon_id:
                 return False
-            prefix = icon_id.split(':', 1)[0]
+            prefix, name = icon_id.split(':', 1)
             if prefix in ANIMATED_SETS:
                 return False
             if collections.get(prefix, {}).get('palette'):
+                return False
+            # Whitelist: only curated monochrome sets
+            if prefix not in POPULAR_RANK:
+                return False
+            # Drop visually-busy variants (duotone, two-tone, broken)
+            name_lc = name.lower()
+            if any(part in name_lc for part in FANCY_NAME_PARTS):
                 return False
             return True
 
