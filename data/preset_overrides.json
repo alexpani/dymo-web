@@ -1,5 +1,5 @@
 {
-  "57 \u00d7 32 mm (Multipurpose, 11354)": {
+  "57 \u00d7 32 mm (Multipurpose, 99019)": {
     "offset_x_mm": 2,
     "offset_y_mm": 0,
     "auto_fit_safety": 0,
@@ -9,6 +9,12 @@
     "offset_x_mm": 2,
     "offset_y_mm": 1.7,
     "auto_fit_safety": 0,
+    "padding_mm": 2
+  },
+  "Nastro 12 mm (auto-fit)": {
+    "offset_x_mm": 0,
+    "offset_y_mm": -1.5,
+    "auto_fit_safety": 0.06,
     "padding_mm": 2
   }
 }
