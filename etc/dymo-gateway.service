@@ -1,0 +1,16 @@
+[Unit]
+Description=DYMO USB printer gateway (thin)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alexpani
+WorkingDirectory=/home/alexpani/dymo-web
+Environment=GATEWAY_PORT=5051
+ExecStart=/home/alexpani/dymo-web/.venv/bin/python gateway.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

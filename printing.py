@@ -1,26 +1,34 @@
 """
 Printing layer.
 
-Two execution paths:
+Three execution paths, picked in this order:
 
-  - DIRECT USB (Linux/Pi, ~1s end-to-end): pipe a PNG through CUPS' own
-    `imagetoraster` and `raster2dymo*` filter binaries (subprocess) and write
-    the resulting DYMO-native bytes directly to /dev/usb/lpN. Skips the slow
-    CUPS USB backend entirely. Used when /dev/usb/lp0 (and lp1 for tape) are
-    accessible to the running user.
+  - GATEWAY HTTP (LXC / any host where DYMO_GATEWAY_URL is set): POSTs the
+    PNG + media + kind to a thin Flask service running on the Pi that owns
+    the USB cable. The Pi runs the actual filter chain and writes to
+    /dev/usb/lpN. Used when env var DYMO_GATEWAY_URL is non-empty.
 
-  - CUPS lp (macOS dev/staging): falls back to the standard `lp` command when
-    /dev/usb/lp* aren't available. Slower on Pi (~33s) but lets the same code
-    work unchanged on the Mac for development.
+  - DIRECT USB (Linux/Pi, ~1s end-to-end): pipes the PNG through CUPS'
+    own `imagetoraster` and `raster2dymo*` filter binaries (subprocess) and
+    writes the resulting DYMO-native bytes directly to /dev/usb/lpN.
+    Skips the slow CUPS USB backend entirely. Used when /dev/usb/lp0
+    (and lp1 for tape) are accessible to the running user.
 
-The frontend doesn't need to know which path is used; list_printers() returns
-the same shape ([{name, is_default}]) in either case.
+  - CUPS lp (macOS dev/staging): falls back to the standard `lp` command
+    when neither of the above is available.
+
+The frontend doesn't need to know which path is used; list_printers()
+returns the same shape ([{name, is_default}]) in all cases.
 """
 
 import os
 import platform
 import subprocess
 import tempfile
+import urllib.request
+import urllib.error
+import json
+import io
 from label_render import FORMATS, DPI, resolve_cups_media
 
 
@@ -143,6 +151,46 @@ def _print_direct(cfg, image, media):
     return len(dymo_bytes)
 
 
+# ── Gateway HTTP (Pi as thin USB gateway, app on LXC) ────────────────────────
+def _gateway_url():
+    return (os.environ.get('DYMO_GATEWAY_URL') or '').rstrip('/')
+
+
+def _print_via_gateway(image, kind, media):
+    """
+    POST the PNG + kind + media to the Pi gateway. The Pi runs the filter
+    chain and writes to /dev/usb/lpN.
+    Returns the number of bytes the gateway reported sending.
+    """
+    base = _gateway_url()
+    buf = io.BytesIO()
+    image.save(buf, format='PNG')
+    png = buf.getvalue()
+
+    boundary = 'dymowebbnd' + os.urandom(8).hex()
+    body = io.BytesIO()
+    def field(name, val):
+        body.write(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{val}\r\n'.encode())
+    field('kind', kind)
+    field('media', media)
+    body.write(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="label.png"\r\n'
+               f'Content-Type: image/png\r\n\r\n'.encode())
+    body.write(png)
+    body.write(f'\r\n--{boundary}--\r\n'.encode())
+
+    req = urllib.request.Request(
+        f'{base}/print',
+        data=body.getvalue(),
+        headers={'Content-Type': f'multipart/form-data; boundary={boundary}'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=15) as r:
+        data = json.loads(r.read().decode())
+    if not data.get('ok'):
+        raise RuntimeError(data.get('error', 'gateway returned ok=false'))
+    return int(data.get('bytes', 0))
+
+
 # ── CUPS lp fallback ──────────────────────────────────────────────────────────
 def _print_via_lp(printer_name, image, fmt, media):
     extra = [] if fmt.get('kind') == 'tape' else ['-o', 'fit-to-page']
@@ -165,10 +213,15 @@ def _print_via_lp(printer_name, image, fmt, media):
 # ── Public API ────────────────────────────────────────────────────────────────
 def list_printers():
     """
-    On Linux, when direct USB is set up (lp0/lp1 accessible), advertise the
-    two virtual queues that the direct path uses. Otherwise fall back to
-    parsing `lpstat -p` (Mac dev/staging).
+    Order of preference: gateway (env DYMO_GATEWAY_URL) > direct USB > lpstat.
+    The two queues advertised in gateway/direct mode are virtual labels for
+    the slot kind — the actual routing happens server-side.
     """
+    if _gateway_url():
+        return [
+            {'name': DIRECT_LABEL['name'], 'is_default': True},
+            {'name': DIRECT_TAPE['name'],  'is_default': False},
+        ]
     direct = []
     for cfg in (DIRECT_LABEL, DIRECT_TAPE):
         if _direct_available_for(cfg['kind']):
@@ -211,8 +264,16 @@ def print_label(printer_name, image, format_index):
     """
     fmt = FORMATS[format_index]
     img_to_send, media = _print_args(fmt, image)
+    kind = fmt.get('kind') or 'label'
 
-    cfg = DIRECT_BY_KIND.get(fmt.get('kind'))
+    if _gateway_url():
+        try:
+            n = _print_via_gateway(img_to_send, kind, media)
+            return True, f"sent {n} bytes via gateway"
+        except Exception as e:
+            return False, f"gateway failed: {e}"
+
+    cfg = DIRECT_BY_KIND.get(kind)
     if cfg and _direct_available_for(cfg['kind']):
         try:
             n = _print_direct(cfg, img_to_send, media)
