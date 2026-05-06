@@ -54,6 +54,7 @@
   .thumb {
     position: relative;
     border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
     border-radius: 6px;
     background: white;
     padding: 4px;
@@ -61,6 +62,8 @@
     transition: border-color 0.15s;
   }
   .thumb:hover { border-color: var(--accent); }
+  .thumb.tape  { border-left-color: #ed8a00; }     /* arancio per nastri */
+  .thumb.label { border-left-color: #6e6e73; }     /* grigio per etichette */
   .thumb img { display: block; width: 100%; height: auto; max-height: 80px; object-fit: contain; }
   .thumb-meta { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
   .thumb-x {
@@ -900,7 +903,7 @@ function renderHistory(items) {
   }
   items.forEach(it => {
     const div = document.createElement('div');
-    div.className = 'thumb';
+    div.className = 'thumb ' + (it.kind === 'tape' ? 'tape' : 'label');
     div.title = (it.format_name || '') + ' — ' + new Date(it.ts * 1000).toLocaleString();
     div.innerHTML = `
       <img src="data:image/png;base64,${it.thumb_b64}" alt="">

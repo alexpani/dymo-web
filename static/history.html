@@ -43,11 +43,14 @@
   }
   .card {
     background: var(--card); border: 1px solid var(--border);
+    border-left: 4px solid var(--border);
     border-radius: 10px; padding: 0.6rem;
     position: relative; cursor: pointer;
     transition: border-color 0.15s, transform 0.1s;
   }
   .card:hover { border-color: var(--accent); }
+  .card.tape  { border-left-color: #ed8a00; }
+  .card.label { border-left-color: #6e6e73; }
   .card:active { transform: scale(0.98); }
   .card img {
     display: block; width: 100%; height: auto;
@@ -139,7 +142,7 @@ function render(data) {
   } else {
     data.items.forEach(it => {
       const card = document.createElement('div');
-      card.className = 'card';
+      card.className = 'card ' + (it.kind === 'tape' ? 'tape' : 'label');
       card.title = (it.format_name || '') + ' — ' + new Date(it.ts * 1000).toLocaleString();
       card.innerHTML = `
         <img src="data:image/png;base64,${it.thumb_b64}" alt="">
