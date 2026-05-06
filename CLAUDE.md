@@ -59,6 +59,21 @@ static/history.html Pagina /history: griglia paginata 10/pagina, filtro
 scripts/update-deps.sh  Aggiorna pacchetti Pi quando cambiano le dependencies
                         (apt install libcairo2 + pip install -r requirements.txt
                         + restart). Da lanciare a mano dopo che le deps cambiano.
+scripts/backup-data.sh  Copia preset_overrides.json + history.json in data/,
+                        commit "data: …", push a 'github' remote. Il post-receive
+                        hook salta il restart per i commit che toccano solo data/.
+scripts/setup-cron-backup.sh
+                        Installa il cron job nightly (03:00) per backup-data.sh.
+scripts/full-recovery.sh
+                        Disaster recovery one-shot: su una SD vergine ricostruisce
+                        tutto (apt, repo, venv, code CUPS, direct-USB, systemd,
+                        autodeploy, cron, restore data/*.json).
+etc/dymo-web.service    Unit systemd template (committata nel repo invece di
+                        sole istruzioni nel README — full-recovery.sh la copia
+                        in /etc/systemd/system/).
+data/                   Snapshot dei JSON di stato (preset_overrides + history)
+                        committati dal cron backup. Sopravvive a qualsiasi SD
+                        wipe perché vive su GitHub.
 static/index.html   Tutto il frontend in un solo file (HTML+CSS+JS).
                     contenteditable per il rich text, B/I via execCommand.
 .claude/launch.json Config per il preview server di Claude Code.

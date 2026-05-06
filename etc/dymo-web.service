@@ -1,0 +1,17 @@
+[Unit]
+Description=DYMO Label Web App
+After=network-online.target cups.service
+Wants=network-online.target
+Requires=cups.service
+
+[Service]
+Type=simple
+User=alexpani
+WorkingDirectory=/home/alexpani/dymo-web
+Environment=PORT=5050
+ExecStart=/home/alexpani/dymo-web/.venv/bin/python app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

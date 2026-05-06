@@ -28,23 +28,27 @@ sudo tee $REPO/hooks/post-receive > /dev/null <<'HOOK'
 #!/bin/bash
 # Auto-deploy: pull the working copy and restart the systemd service
 # whenever someone pushes to the bare repo.
+# Skips the restart when the only files changed live under data/ — those
+# are the nightly backup commits and don't affect the running code.
 set -e
 
 WORK=/home/alexpani/dymo-web
 BRANCH=main
 
-# Read each ref that was pushed; only deploy on 'main'
 while read oldrev newrev refname; do
     branch=$(echo "$refname" | sed 's,refs/heads/,,')
     if [ "$branch" = "$BRANCH" ]; then
         echo "[post-receive] deploying $branch ($newrev)"
-        # Hooks run with GIT_DIR pointing at the bare repo — clear it so
-        # the pull below operates on the working copy.
         unset GIT_DIR GIT_WORK_TREE
         cd "$WORK"
         git pull --ff-only origin "$BRANCH"
-        sudo /usr/bin/systemctl restart dymo-web
-        echo "[post-receive] deploy done."
+        # Restart only if something outside data/ changed
+        if git diff --name-only "$oldrev..$newrev" 2>/dev/null | grep -qv '^data/'; then
+            sudo /usr/bin/systemctl restart dymo-web
+            echo "[post-receive] deploy done (service restarted)."
+        else
+            echo "[post-receive] data-only change; service not restarted."
+        fi
     fi
 done
 HOOK

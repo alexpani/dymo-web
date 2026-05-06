@@ -280,6 +280,35 @@ Da quel momento in poi: `git push pi main` dal Mac fa deploy automatico in <5s.
   potrebbero differire — verifica con `lpoptions -p <nome> -l` e aggiorna
   `FORMATS` se serve.
 
+## Backup automatico + Disaster recovery
+
+L'app salva due file di stato sul Pi:
+- `~/.config/dymo-web/preset_overrides.json` — taratura per preset (offset, padding, ecc.)
+- `~/.config/dymo-web/history.json` — cronologia stampe con miniature
+
+### Backup notturno
+Una volta installato `scripts/setup-cron-backup.sh`, ogni notte alle 03:00:
+1. I due JSON vengono copiati in `~/dymo-web/data/`
+2. Se cambiati, fa commit `data: nightly backup YYYY-MM-DD HH:MM`
+3. `git push github main` (richiede SSH key sul Pi autorizzata su GitHub)
+
+Il post-receive hook è già configurato per **NON restartare il service**
+quando i commit toccano solo `data/`, quindi i backup sono no-op funzionali.
+
+### Recovery in <10 minuti
+Se la SD del Pi muore:
+1. Reflash con Raspberry Pi Imager (Pi OS Lite 64-bit, stesso utente)
+2. SSH al Pi, poi:
+   ```bash
+   sudo apt-get install -y git
+   git clone https://github.com/alexpani/dymo-web.git ~/dymo-web
+   ~/dymo-web/scripts/full-recovery.sh
+   ```
+Lo script ricostruisce tutto: pacchetti apt, code CUPS DYMO, direct-USB,
+systemd unit, auto-deploy hook, cron backup, e riapplica i `data/*.json`
+salvati nel repo. L'unica cosa da rifare a mano dopo è aggiungere la
+chiave SSH del nuovo Pi a GitHub se vuoi che il backup notturno riprenda.
+
 ## Tarare l'offset di stampa
 
 Se la stampa esce sistematicamente spostata (es. la 11354 fuoriesce di 1 mm
