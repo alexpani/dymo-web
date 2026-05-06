@@ -1,373 +1,321 @@
 # DYMO Label Web App
 
-Web app personale per stampare etichette su una **DYMO LabelWriter Duo** collegata
-via USB al Mac. Server Flask locale, frontend HTML/JS vanilla, stampa via CUPS (`lp`).
+Web app personale per stampare etichette su una **DYMO LabelWriter Duo** (USB).
+In produzione gira su un **Raspberry Pi 4** sempre acceso, accessibile da
+qualsiasi browser sulla LAN (Mac, iPhone, ecc.). Frontend HTML + JS vanilla,
+backend Flask, stampa via pipeline diretta a `/dev/usb/lpN` che bypassa il
+backend USB di CUPS (~30 s → istantaneo).
 
-Pensata per uso casalingo / piccolo ufficio: aprila dal Mac o dall'iPhone sulla
-stessa rete Wi-Fi e stampa.
+Repo: [github.com/alexpani/dymo-web](https://github.com/alexpani/dymo-web)
+
+---
 
 ## Funzionalità
 
-- **Editor rich text** (contenteditable nativo): seleziona una parte del testo e
-  applica grassetto / corsivo solo a quella.
-- **4 preset etichette adesive** (89×36, 89×28, 57×32, 32×57 mm) +
-  **3 multipurpose/shipping** (102×54 / 51×19 / 25×25 mm) +
-  **4 preset nastro D1** (9, 12, 19, 24 mm). Default: 11354 (57×32 mm).
-- **Auto-selezione stampante** in base al tipo di preset (slot Label vs Tape).
-  Il selettore si nasconde quando c'è un'unica scelta sensata.
-- **Auto-fit del font** (binary search), con override slider + bottone "Auto",
-  e **margine di sicurezza** configurabile dalla pagina Impostazioni.
-- **Auto-fit della lunghezza** sui nastri (come la app DYMO ufficiale).
+### Editor
+- **Rich text** in `contenteditable`: seleziona una parte e applica
+  grassetto / corsivo solo a quella.
 - **Allineamento** sx / centro / dx (icone stile word-processor).
-- **Decoro** (mutuamente esclusivo): QR code o **icona da [Iconify](https://iconify.design/)**
-  (~150k icone ricercabili da una sola search box). Posizionabile sx/dx/sopra/sotto
-  rispetto al testo, oppure centrato se l'etichetta non ha testo.
-- **Gestore preset** (icona ⚙ in alto a destra → `/presets`): per ogni preset
-  puoi regolare offset stampa X/Y in mm (compensazione meccanica — applicato
-  solo alla stampa, l'anteprima resta nominale), margine auto-fit del font, e
-  padding interno. Override salvati in `~/.config/dymo-web/preset_overrides.json`.
-- **Cronologia stampe**: sidebar in home con le ultime 5 (su mobile diventa
-  barra orizzontale). Click su una miniatura ricarica testo, formato e decoro
-  pronti da ristampare/modificare; hover mostra una × per rimuoverla. Pagina
-  `/history` con filtri (tipo) e paginazione 10 alla volta. Cap 200 entries
-  in `~/.config/dymo-web/history.json`.
-- **Stato stampante** (pallino accanto all'ingranaggio): verde = DYMO online,
-  rosso = nessuna DYMO trovata. Refresh ogni 30s.
-- **Conferma stampa**: il bottone "Stampa" mostra brevemente "✓" al successo,
-  niente messaggi tecnici a schermo.
-- **Anteprima live** con debounce 300 ms.
+- **Slider Dim. font**: auto-fit di default; sposta lo slider per forzare
+  un valore, click "Auto" per tornare al fit automatico.
+- **Slider Interlinea** 0–100% (default 20%).
+- **Reset** azzera l'editor; **Salva bozza** mette l'etichetta in cronologia
+  senza stamparla.
+- **Persistenza in localStorage**: ricarichi la pagina e ritrovi l'ultima
+  cosa che stavi scrivendo (testo, formato, decoro, slider).
 
-## Setup
+### Decoro (mutuamente esclusivo: QR o icona)
+- **QR code** (testo o URL) o
+- **Icona da [Iconify](https://iconify.design/)**: search box, dropdown set,
+  ~150k icone disponibili. Filtri server-side: solo set curati (lucide,
+  tabler, mdi, material-symbols, phosphor, heroicons, solar, ic, ri,
+  carbon, fluent, bx, octicon, feather, akar-icons), niente
+  duotone/two-tone/broken, niente animate, niente colorate. Search molto
+  più pulita rispetto al sito Iconify.
+- Il decoro si posiziona a sx/dx/sopra/sotto rispetto al testo, oppure
+  centrato sull'etichetta se non c'è testo.
 
-```bash
-cd ~/Claude\ Code/dymo-web
-# system dep per il rendering SVG delle icone Iconify
-brew install cairo pkg-config        # macOS
-# (Pi: vedi scripts/update-deps.sh — fa apt install libcairo2)
-
-python3.12 -m venv .venv
-source .venv/bin/activate
-PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig pip install -r requirements.txt
-cp .env.example .env   # opzionale, default PORT=5050
-```
-
-## Avvio
-
-```bash
-source .venv/bin/activate
-python app.py
-```
-
-Apri **http://localhost:5050** sul Mac, oppure `http://<ip-del-mac>:5050` da iPhone
-sulla stessa rete.
-
-## Preset etichette
+### Preset
+11 preset built-in (vedi sotto). Default: **57 × 32 mm (99019)**.
 
 | Preset                       | Codice | Media CUPS              | Stampante  |
 | ---------------------------- | ------ | ----------------------- | ---------- |
 | 89 × 36 mm Address           | 99012  | `w101h252`              | `_Label`   |
+| 57 × 32 mm Multipurpose      | 99019  | `w162h90`               | `_Label`   |
+| 32 × 57 mm Multipurpose vert | 99019  | `w162h90`               | `_Label`   |
 | 89 × 28 mm Address Small     | 99010  | `w81h252`               | `_Label`   |
-| 57 × 32 mm Multipurpose      | 11354  | `w162h90`               | `_Label`   |
-| 32 × 57 mm Multipurpose vert | 11354  | `w162h90`               | `_Label`   |
+| 102 × 54 mm Shipping         | 99014  | `w154h286.2`            | `_Label`   |
+| 51 × 19 mm Multipurpose      | 11355  | `w54h144`               | `_Label`   |
+| 25 × 25 mm Multipurpose      | 11353  | `w72h72`                | `_Label`   |
 | Nastro 9 mm  (auto-fit)      | D1-9   | `Custom.9xLENGTHmm`     | `_Tape`    |
 | Nastro 12 mm (auto-fit)      | D1-12  | `Custom.12xLENGTHmm`    | `_Tape`    |
 | Nastro 19 mm (auto-fit)      | D1-19  | `Custom.19xLENGTHmm`    | `_Tape`    |
 | Nastro 24 mm (auto-fit)      | D1-24  | `Custom.24xLENGTHmm`    | `_Tape`    |
 
-I preset Tape (`kind: 'tape'`) hanno **lunghezza variabile**: il PNG viene ruotato
-in portrait e la lunghezza è calcolata dal contenuto.
+I preset Tape hanno **lunghezza variabile**: il PNG viene ruotato in
+portrait e la lunghezza è calcolata dal contenuto. Cambiare/aggiungere
+preset: edita `FORMATS` in `label_render.py`.
 
-Per aggiungere un preset: edita `FORMATS` in `label_render.py`. Per i preset Label,
-`cups_media` deve essere uno dei nomi nel PPD:
+### Cronologia
+- **Sidebar in home** con le 8 stampe più recenti come miniature.
+- **Pagina `/history`** paginata 10/pagina, filtro per tipo (label/tape).
+- **Click** su una miniatura ricarica testo, formato, decoro, slider —
+  pronta da modificare/ristampare.
+- **Hover → ×** rimuove l'entry dalla cronologia.
+- **De-duplicazione**: stampare/salvare lo stesso payload due volte non
+  crea doppioni — la vecchia entry viene rimossa e la nuova va in cima.
+- Capacità: 200 entries max (FIFO) in `~/.config/dymo-web/history.json`.
+- **Color-coding**: bordo sinistro arancio = nastro, grigio = etichetta.
 
-```bash
-lpoptions -p DYMO_LabelWriter_DUO_Label -l   # cerca "PageSize"
+### Gestore preset (`/presets`)
+Per ogni preset puoi regolare:
+- **Offset stampa X / Y in mm** — compensa disallineamenti meccanici della
+  stampante. **Applicato solo alla stampa**, l'anteprima resta nominale.
+- **Margine auto-fit** (0–50%) — riduzione del font massimo per più aria.
+- **Padding interno** (mm) — spazio bianco intorno a testo/decoro.
+
+Override salvati in `~/.config/dymo-web/preset_overrides.json`.
+Sono **server-side authoritative**: cambi una volta, valgono per tutti i
+client (Mac + iPhone) senza dover passare nulla nel payload.
+
+### Indicatori
+- **Pallino in alto a destra**: verde = DYMO online, rosso = nessuna DYMO.
+  Refresh ogni 30 s.
+- **Bottone "Stampa"** mostra ✓ al successo, niente messaggi tecnici.
+- **Anteprima live** con debounce 300 ms.
+- **Selettore stampante** nascosto quando c'è una sola scelta sensata.
+
+---
+
+## Workflow di sviluppo
+
+```
+edit su Mac  →  git push origin main
+                       │
+        ┌──────────────┼──────────────┐
+        ▼                             ▼
+   GitHub (backup)            Pi bare repo /opt/git/dymo-web.git
+                                       │
+                                       ▼
+                            post-receive hook:
+                              git pull working-copy
+                              systemctl restart dymo-web
+                              (skip restart se cambia solo data/)
 ```
 
-Se non c'è, lascia `cups_media: None` e il backend userà `Custom.WxHmm`.
+Un singolo `git push origin main` da Mac:
+- aggiorna GitHub
+- triggera l'auto-deploy sul Pi (~2 s)
 
-## Stack
-
-- **Backend**: Python 3.12 + Flask + waitress
-- **Rendering**: Pillow (300 DPI), `qrcode[pil]`
-- **Stampa**:
-  - **Linux/Pi**: pipeline `imagetoraster | raster2dymo[lw|lm]` (CUPS filter
-    binaries via subprocess) + write diretto a `/dev/usb/lpN`. **Bypassa il
-    backend USB di CUPS** che era il collo di bottiglia (~30s → istantaneo).
-  - **macOS**: fallback su `lp` (auto-detect: se `/dev/usb/lp*` non sono
-    accessibili usa CUPS classico).
-- **Frontend**: HTML + CSS + JS vanilla in `static/index.html`, no framework, no build
-- **Persistenza**: nessuna
+---
 
 ## Architettura "Direct USB" (Pi)
 
 ```
-PIL render (PNG, ~30ms)
+PIL render (PNG, ~30 ms)
     ↓
-imagetoraster (CUPS filter binary, subprocess) → cups-raster (~30ms)
+imagetoraster (CUPS filter binary, subprocess)  → cups-raster (~30 ms)
     ↓
-raster2dymolw / raster2dymolm (CUPS filter binary, subprocess) → DYMO native bytes (~30ms)
+raster2dymolw / raster2dymolm (CUPS filter binary, subprocess)
+                                                → DYMO native bytes (~30 ms)
     ↓
-write to /dev/usb/lp0 (label) or /dev/usb/lp1 (tape) (~10ms)
+write to /dev/usb/lp0 (label) o /dev/usb/lp1 (tape) (~10 ms)
 ```
 
-Niente `lp`, niente `cupsd` in mezzo. Le code CUPS DYMO vengono comunque
-**lasciate installate ma disabilitate** (`cupsdisable`) perché ci serve
-ancora il loro PPD per i CUPS filter binari.
+Niente `lp`, niente `cupsd` in mezzo. Le code CUPS DYMO sono `cupsdisable`d
+ma installate, perché ci serve ancora il loro PPD per i filter binari.
 
-## Dipendenza dai driver DYMO
+Su macOS (dev/staging) c'è un fallback automatico: se `/dev/usb/lp*` non
+esiste o non è scrivibile, `printing.py` usa il classico `lp`.
 
-Su Linux il pacchetto `printer-driver-dymo` (open source, in Debian) fornisce
-i filter `raster2dymolw` / `raster2dymolm` che sappiamo essere veloci e affidabili.
-Niente kext, niente drivers Intel-only, niente Rosetta.
+---
 
-Su macOS l'app funziona via CUPS finché ci sono i driver DYMO ufficiali, ma
-quei driver sono x86_64-only e DYMO ne sconsiglia l'uso su Apple Silicon
-recente. Per uso "permanente" si consiglia il Pi.
+## Stack
 
-## Setup su Raspberry Pi (deploy permanente)
+- **Backend**: Python 3.13 + Flask + waitress
+- **Rendering**: Pillow (300 DPI), `qrcode[pil]`
+- **Icone**: Iconify SVG → PNG via `svglib` + `reportlab` (cache in `/tmp`)
+- **Font**: DejaVu Sans (Pi) / Helvetica.ttc (Mac), selezione per piattaforma
+- **Stampa**: subprocess CUPS filter binaries → `/dev/usb/lpN`
+- **Frontend**: HTML + CSS + JS vanilla in `static/index.html`, no build, no framework
+- **Persistenza**: `~/.config/dymo-web/{preset_overrides,history}.json`
+  + `localStorage` lato browser per il draft dell'editor
+- **Backup**: cron 03:00 → commit `data:` + push GitHub
 
-Il setup consigliato è far girare l'app su un **Raspberry Pi 4** sempre acceso,
-con la DYMO collegata via USB al Pi. Mac e iPhone restano client che aprono il
-browser.
+---
 
-### Preparazione SD (Mac)
-1. **Raspberry Pi Imager** → Raspberry Pi OS Lite (64-bit)
-2. Edit settings: hostname `dymo`, SSH abilitato (incolla la public key),
-   user/password, Wi-Fi se serve, locale `Europe/Rome`
-3. Flash, inserisci nel Pi, alimenta
+## Setup nuovo Raspberry Pi (da zero)
 
-### Setup sistema (sul Pi via SSH `alexalexpani@dymo.local`)
+> Tempo: ~10 min totali. Requisiti: una microSD (≥ 8 GB) e accesso fisico/SSH al Pi.
+
+### 1. Flash della SD
+- **Raspberry Pi Imager** → "Raspberry Pi OS Lite (64-bit)"
+- Edit settings: hostname `dymo`, username `alexpani`, SSH abilitato (incolla
+  la public key del Mac), Wi-Fi se serve, locale `Europe/Rome`.
+- Flash, inserisci nel Pi, alimenta. Aspetta 90 s al primo boot.
+
+### 2. Recovery one-shot
 ```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3-venv python3-pip cups printer-driver-dymo \
-                    fonts-dejavu git
-sudo usermod -aG lpadmin $USER
-
-# CUPS accessibile in rete (per amministrare via http://dymo.local:631)
-sudo cupsctl --remote-admin --remote-any --share-printers
-sudo systemctl enable --now cups
+ssh alexpani@dymo.local
+sudo apt-get install -y git
+git clone https://github.com/alexpani/dymo-web.git ~/dymo-web
+~/dymo-web/scripts/full-recovery.sh
 ```
 
-### Aggiunta DYMO (CUPS) — serve solo per ottenere i PPD
-Collega la DYMO via USB al Pi e aggiungi le due code via CLI:
-```bash
-sudo lpadmin -p DYMO_LabelWriter_DUO_Label -E \
-  -v 'usb://DYMO/LabelWriter%20DUO%20Label?serial=<SERIAL>' \
-  -m dymo:0/cups/model/lwduol.ppd
-sudo lpadmin -p DYMO_LabelWriter_DUO_Tape_128 -E \
-  -v 'usb://DYMO/LabelWriter%20DUO%20Tape%20128?serial=<SERIAL>&interface=1' \
-  -m dymo:0/cups/model/lwduot2.ppd
-```
-(`<SERIAL>` lo trovi con `lpinfo -v | grep -i dymo`.)
+Lo script `full-recovery.sh` ricostruisce TUTTO:
+- pacchetti apt (Python, CUPS, `printer-driver-dymo`, font, libcairo)
+- venv + `pip install -r requirements.txt`
+- code CUPS DYMO (auto-rileva il serial USB della Duo collegata)
+- direct-USB (`usblp` + udev rule + gruppo `lp` + `cupsdisable` delle code)
+- systemd unit (da `etc/dymo-web.service`)
+- bare repo `/opt/git/dymo-web.git` + post-receive hook + sudoers NOPASSWD
+- cron nightly per il backup
+- ripristino di `data/preset_overrides.json` + `data/history.json`
 
-In alternativa, le puoi aggiungere graficamente dal Mac via `http://dymo.local:631`.
-
-### Direct USB (sblocca la velocità ~istantanea)
-Il backend USB di CUPS è troppo lento per la DYMO Duo (~30s a etichetta).
-Lo script `scripts/setup-pi-direct-usb.sh` configura la pipeline diretta:
-
-```bash
-./scripts/setup-pi-direct-usb.sh
-```
-
-Cosa fa (tutto idempotente, sudo password una volta):
-- Aggiunge `alexpani` al gruppo `lp` (per scrivere su `/dev/usb/lpN`)
-- Installa una udev rule che porta `/dev/usb/lpN` a permessi `lp` group
-- Disabilita le code CUPS DYMO (`cupsdisable` + `cupsreject`) — restano
-  installate ma non accettano job, così il loro PPD resta utilizzabile
-- Verifica che `/dev/usb/lp0` (label) e `/dev/usb/lp1` (tape) siano scrivibili
-
-**Importante**: dopo lo script, rifare login SSH (per ricaricare il gruppo `lp`)
-oppure restartare il service:
-```bash
-sudo systemctl restart dymo-web
-```
-
-### Bare repo Git + push dal Mac
-Sul Pi:
-```bash
-sudo mkdir -p /opt/git && sudo chown $USER:$USER /opt/git
-git init --bare /opt/git/dymo-web.git
-```
-Sul Mac:
+### 3. Aggiungi il Pi come remote sul Mac
 ```bash
 cd ~/Claude\ Code/dymo-web
 git remote add pi alexpani@dymo.local:/opt/git/dymo-web.git
-git push pi main
-```
-Sul Pi:
-```bash
-git clone /opt/git/dymo-web.git ~/dymo-web
-cd ~/dymo-web && python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### Auto-start (systemd)
-Crea `/etc/systemd/system/dymo-web.service`:
-```ini
-[Unit]
-Description=DYMO Label Web App
-After=network-online.target cups.service
-Requires=cups.service
-
-[Service]
-Type=simple
-User=alexpani
-WorkingDirectory=/home/alexpani/dymo-web
-Environment=PORT=5050
-ExecStart=/home/alexpani/dymo-web/.venv/bin/python app.py
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-```bash
-sudo systemctl daemon-reload && sudo systemctl enable --now dymo-web
-journalctl -u dymo-web -f   # log in tempo reale
-```
-
-### Auto-deploy con `git push`
-Per non dover restartare a mano dopo ogni push, lancia una volta sul Pi:
-```bash
-./scripts/setup-pi-autodeploy.sh
-```
-Cosa installa:
-- `/etc/sudoers.d/dymo-web`: NOPASSWD per alexpani solo su `systemctl restart dymo-web`
-- `/opt/git/dymo-web.git/hooks/post-receive`: dopo ogni push su `main`, fa
-  `git pull --ff-only` nel working copy + `sudo systemctl restart dymo-web`
-
-### Dual-push (GitHub + Pi in un solo comando)
-Lo sviluppo gira anche su [github.com/alexpani/dymo-web](https://github.com/alexpani/dymo-web).
-Configurando `origin` con due push URL, un singolo `git push origin main`
-manda i commit sia su GitHub (backup pubblico) sia sul Pi (deploy + restart):
-
-```bash
-git remote set-url --add --push origin https://github.com/alexpani/dymo-web.git
+# oppure dual-push via origin (consigliato):
 git remote set-url --add --push origin alexpani@dymo.local:/opt/git/dymo-web.git
 ```
 
-Output tipico:
-```
-To https://github.com/alexpani/dymo-web.git
-   <hash>..<hash>  main -> main
-remote: [post-receive] deploying main (<hash>)
-remote: [post-receive] deploy done.
-To dymo.local:/opt/git/dymo-web.git
-   <hash>..<hash>  main -> main
-```
-
-Da quel momento il workflow è: edit → `git commit` → `git push origin main` → fine.
-
-### Deploy automatico (opzionale)
-Sul Pi, in `/opt/git/dymo-web.git/hooks/post-receive`:
+### 4. (Opzionale) Backup notturno verso GitHub
+Sul Pi:
 ```bash
-#!/bin/bash
-cd /home/pani/dymo-web && git pull --ff-only && sudo systemctl restart dymo-web
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+cat ~/.ssh/id_ed25519.pub   # copia su https://github.com/settings/keys
+cd ~/dymo-web && git remote add github git@github.com:alexpani/dymo-web.git
+~/dymo-web/scripts/backup-data.sh   # test manuale
 ```
-+ snippet sudoers `/etc/sudoers.d/dymo-web`:
+
+Da qui in avanti il cron alle 03:00 (installato dal recovery script)
+copia i due JSON in `data/`, fa commit, e pusha.
+
+---
+
+## Setup dev su Mac
+
+```bash
+cd ~/Claude\ Code/dymo-web
+brew install cairo pkg-config        # per svglib (Iconify SVG → PNG)
+python3.12 -m venv .venv
+source .venv/bin/activate
+PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig pip install -r requirements.txt
+cp .env.example .env                  # opzionale, default PORT=5050
+python app.py
 ```
-pani ALL=(root) NOPASSWD: /usr/bin/systemctl restart dymo-web
-```
-Da quel momento in poi: `git push pi main` dal Mac fa deploy automatico in <5s.
 
-### Note sul rendering Linux
-- Il font usato su Linux è **DejaVu Sans** (4 file separati per le facce). Il
-  codice rileva la piattaforma in `label_render.py:FONT_FACES` e cambia path da
-  solo. Per cambiare font, modifica quella mappa.
-- I `cups_media` dei preset sono validati per i PPD macOS DYMO. Su Linux i nomi
-  potrebbero differire — verifica con `lpoptions -p <nome> -l` e aggiorna
-  `FORMATS` se serve.
+Apri **http://localhost:5050**. Su Mac con DYMO collegata via USB il
+fallback CUPS `lp` viene usato automaticamente — niente direct-USB.
 
-## Backup automatico + Disaster recovery
-
-L'app salva due file di stato sul Pi:
-- `~/.config/dymo-web/preset_overrides.json` — taratura per preset (offset, padding, ecc.)
-- `~/.config/dymo-web/history.json` — cronologia stampe con miniature
-
-### Backup notturno
-Una volta installato `scripts/setup-cron-backup.sh`, ogni notte alle 03:00:
-1. I due JSON vengono copiati in `~/dymo-web/data/`
-2. Se cambiati, fa commit `data: nightly backup YYYY-MM-DD HH:MM`
-3. `git push github main` (richiede SSH key sul Pi autorizzata su GitHub)
-
-Il post-receive hook è già configurato per **NON restartare il service**
-quando i commit toccano solo `data/`, quindi i backup sono no-op funzionali.
-
-### Recovery in <10 minuti
-Se la SD del Pi muore:
-1. Reflash con Raspberry Pi Imager (Pi OS Lite 64-bit, stesso utente)
-2. SSH al Pi, poi:
-   ```bash
-   sudo apt-get install -y git
-   git clone https://github.com/alexpani/dymo-web.git ~/dymo-web
-   ~/dymo-web/scripts/full-recovery.sh
-   ```
-Lo script ricostruisce tutto: pacchetti apt, code CUPS DYMO, direct-USB,
-systemd unit, auto-deploy hook, cron backup, e riapplica i `data/*.json`
-salvati nel repo. L'unica cosa da rifare a mano dopo è aggiungere la
-chiave SSH del nuovo Pi a GitHub se vuoi che il backup notturno riprenda.
+---
 
 ## Tarare l'offset di stampa
 
-Se la stampa esce sistematicamente spostata (es. la 11354 fuoriesce di 1 mm
-a sinistra rispetto al bordo dell'etichetta):
+Se la stampa esce sistematicamente spostata:
 
-1. Stampa una etichetta di test con un contenuto centrato chiaro (es. solo
-   un quadrato nero o "Centro").
-2. Misura lo scostamento con un righello: in che direzione, quanti mm.
-3. Apri **http://dymo.local:5050/presets**, click sul preset.
-4. **Offset X**: positivo sposta il contenuto a destra, negativo a sinistra.
-   Se la stampa esce 1 mm troppo a sinistra → metti `1.0`. Stesso per Y
-   (positivo = giù, negativo = su). Step 0.1 mm.
-5. Salva e ristampa. Aggiusta finché è centrato.
+1. Stampa una etichetta di test con un contenuto centrato (es. solo
+   `Centro`).
+2. Misura lo scostamento col righello (in che direzione, quanti mm).
+3. Apri `http://dymo.local:5050/presets`, click sul preset.
+4. **Offset X**: positivo sposta a destra, negativo a sinistra.
+   **Offset Y**: positivo giù, negativo su. Step 0.1 mm.
+5. Salva e ristampa.
 
 L'**anteprima resta nominale** durante la taratura (l'offset è una
 compensazione meccanica della stampante, non una modifica del layout).
 
+---
+
+## Backup automatico + Disaster recovery
+
+Stato salvato sul Pi:
+- `~/.config/dymo-web/preset_overrides.json` — taratura per preset
+- `~/.config/dymo-web/history.json` — cronologia con miniature
+
+**Ogni notte alle 03:00** (cron utente alexpani):
+1. I due JSON vengono copiati in `~/dymo-web/data/`
+2. Se cambiati: commit `data: nightly backup YYYY-MM-DD HH:MM`
+3. `git push github main`
+
+Il post-receive hook **non riavvia il service** quando il commit tocca
+solo `data/` — i backup sono no-op funzionali per l'app.
+
+**Se la SD muore**: reflash + i 4 comandi della sezione "Setup nuovo
+Raspberry Pi" sopra. Il `full-recovery.sh` riapplica anche i
+`data/*.json` salvati nel repo, recuperando calibrazione e cronologia.
+
+---
+
 ## Troubleshooting
 
-### La stampante non appare in `lpstat -p`
-
-- Verifica che la DYMO sia collegata: `system_profiler SPUSBDataType | grep -i dymo`
-- Aggiungila in *Impostazioni di Sistema → Stampanti e Scanner → +*
-- La LabelWriter Duo appare come **due** code distinte: `..._Label` (adesive) e
-  `..._Tape` (nastro D1). Aggiungile entrambe se vuoi usare entrambi gli slot.
-
-### CUPS error: `UsbPrinterClassDriver.bundle non disponibile`
-
-Il filtro USB del driver DYMO è stato rimosso (capita su update di macOS).
-Reinstalla **DYMO Label v8** o **DYMO Connect for Desktop**, poi verifica che
-esista `/Library/Printers/DYMO/Filters/UsbPrinterClassDriver.bundle`.
+### La DYMO non appare in `lpstat -p`
+- Verifica che sia collegata: `lsusb | grep -i dymo`
+- Sul Pi: il device dovrebbe esporre `/dev/usb/lp0` e `/dev/usb/lp1`
+  (servono `usblp` caricato + udev rule, fatti dal recovery script)
+- Se fai add manuale via web CUPS (`http://dymo.local:631`): la Duo
+  appare come **due** code distinte (`..._Label` per adesive,
+  `..._Tape_128` per nastro D1).
 
 ### Stampa esce a cavallo di due etichette / avanza troppo
-
-Il driver non riconosce il media size richiesto e usa il default. Trova il nome
-esatto nel PPD:
-
+Il driver non riconosce il media size richiesto e usa il default. Trova
+il nome esatto nel PPD e aggiorna `cups_media` nel preset:
 ```bash
-grep "11354\|99012\|99010" /etc/cups/ppd/DYMO_LabelWriter_DUO_Label.ppd | head
+grep '^\*PageSize' /etc/cups/ppd/DYMO_LabelWriter_DUO_Label.ppd
 ```
 
-Aggiorna `cups_media` nel relativo preset.
-
-### La stampante Tape si disabilita dopo un errore
-
-Dopo un job fallito CUPS può disabilitare la stampante e bloccare la coda.
-Riabilitala una volta sola:
-
+### CUPS disabilita la stampante dopo un errore
+Job in coda forever, "Impossibile inviare i dati". Una volta:
 ```bash
 cupsenable DYMO_LabelWriter_DUO_Tape_128
 lpadmin -p DYMO_LabelWriter_DUO_Tape_128 -o printer-error-policy=retry-current-job
 ```
 
-Il secondo comando configura CUPS a riprovare invece di disabilitare la stampante
-al primo errore (persistente in `/etc/cups/printers.conf`).
-
 ### Pagina vuota / contenuto strano nel browser
+Service Worker stale di un'altra app installata in passato sullo stesso
+host:port. DevTools → Application → Service Workers → Unregister, e
+clear cache.
 
-Se hai mai installato un'altra app web su `localhost:5050` (tipo "Labelle Web"),
-il suo Service Worker potrebbe intercettare le richieste e servire la versione
-cached. In DevTools → Application → Service Workers → Unregister, e svuota la
-cache.
+### macOS: `UsbPrinterClassDriver.bundle non disponibile`
+Il filtro USB del driver DYMO è stato rimosso (capita su update di macOS).
+Reinstalla **DYMO Label v8** o **DYMO Connect for Desktop**, poi verifica
+che esista `/Library/Printers/DYMO/Filters/UsbPrinterClassDriver.bundle`.
+Per uso permanente, vai sul Pi.
+
+### Il backup notturno non gira
+- `tail -f ~/.dymo-web-backup.log` sul Pi (cron loga lì)
+- Verifica `git remote -v` sul working copy: serve un `github` remote
+- Verifica che la chiave SSH del Pi sia su https://github.com/settings/keys
+
+---
+
+## Layout repo
+
+```
+app.py                 Flask routes + waitress runner
+label_render.py        FORMATS (preset) + render() (label vs tape) + Iconify fetch
+printing.py            Direct USB (Linux) o lp (Mac fallback)
+presets_store.py       JSON store delle override per-preset
+history.py             Ring buffer della cronologia stampe (cap 200)
+requirements.txt       Flask, waitress, Pillow, qrcode, svglib, reportlab, dotenv
+
+static/
+  index.html           Tutto il frontend home (HTML+CSS+JS vanilla)
+  presets.html         Pagina /presets per gli override
+  history.html         Pagina /history paginata
+
+etc/
+  dymo-web.service     Unit systemd (installata in /etc/systemd/system/ dal recovery)
+
+scripts/
+  full-recovery.sh         One-shot setup completo per un Pi nuovo
+  setup-pi-direct-usb.sh   Direct-USB setup (usblp + udev + gruppo lp)
+  setup-pi-autodeploy.sh   Bare repo + post-receive hook + sudoers
+  setup-cron-backup.sh     Cron nightly 03:00
+  backup-data.sh           Copia JSON in data/ + commit + push GitHub
+  update-deps.sh           apt + pip dopo cambio requirements
+  bench-direct.py          Profilatura della pipeline (no stampa fisica)
+
+data/                  Snapshot dei JSON di stato (commitati dal cron)
+```
