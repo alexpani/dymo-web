@@ -1,0 +1,14 @@
+{
+  "57 \u00d7 32 mm (Multipurpose, 11354)": {
+    "offset_x_mm": 2,
+    "offset_y_mm": 0,
+    "auto_fit_safety": 0,
+    "padding_mm": 2
+  },
+  "51 \u00d7 19 mm (Multipurpose, 11355)": {
+    "offset_x_mm": 2,
+    "offset_y_mm": 1.7,
+    "auto_fit_safety": 0,
+    "padding_mm": 2
+  }
+}
