@@ -184,10 +184,21 @@ def api_history_delete(entry_id):
     return jsonify({'deleted': history.delete(entry_id)})
 
 
+# Iconify icon sets that contain only animated SVGs (have <animate> tags).
+# A still print of an animated icon is usually just a partial frame, useless
+# for a label.
+ANIMATED_SETS = {'line-md', 'svg-spinners'}
+
+
 @app.route('/api/icons/search')
 def icons_search():
-    """Proxy to https://api.iconify.design/search — keeps icon discovery
-    server-side (consistent retries, easier to swap library later)."""
+    """Proxy to https://api.iconify.design/search.
+
+    Drops icons that wouldn't print well on a monochrome thermal printer:
+    - colorful sets (emoji, flag, flat-color): identified via Iconify's
+      'palette' flag in the per-collection metadata
+    - animated sets: hard-coded blacklist (Iconify has no 'animated' tag)
+    """
     q = (request.args.get('q') or '').strip()
     if not q:
         return jsonify({'icons': []})
@@ -197,7 +208,17 @@ def icons_search():
         req = urllib.request.Request(url, headers={'User-Agent': 'dymo-web/1.0'})
         with urllib.request.urlopen(req, timeout=5) as r:
             data = json.loads(r.read().decode())
-        return jsonify({'icons': data.get('icons', [])})
+        collections = data.get('collections', {})
+        def keep(icon_id):
+            if ':' not in icon_id:
+                return False
+            prefix = icon_id.split(':', 1)[0]
+            if prefix in ANIMATED_SETS:
+                return False
+            if collections.get(prefix, {}).get('palette'):
+                return False
+            return True
+        return jsonify({'icons': [ic for ic in data.get('icons', []) if keep(ic)]})
     except Exception as e:
         return jsonify({'icons': [], 'error': str(e)}), 502
 
