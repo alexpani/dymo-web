@@ -389,7 +389,6 @@ async function saveOverride(name, form) {
 }
 
 async function printCalibration(index, fmt, form) {
-  if (!confirm(`Stampare il pattern di calibrazione su "${fmt.name}"?\n\nUserà gli offset attualmente salvati per il preset.`)) return;
   const status = form.querySelector('.status-ovr');
   status.className = 'status status-ovr';
   status.textContent = 'Invio…';
