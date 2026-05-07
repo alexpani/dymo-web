@@ -250,6 +250,10 @@ function buildForm(index, fmt, eff, isNew) {
     <div class="actions">
       <button class="primary" data-action="save-overrides">Salva aggiustamenti</button>
       <button class="danger" data-action="reset-overrides">Ripristina default</button>
+      <button data-action="print-calibration" title="Stampa pattern di calibrazione">Stampa calibrazione</button>
+    </div>
+    <div class="field-help" style="margin-top: 0.4rem;">
+      Stampa una griglia con croce centrale e righelli mm: misura di quanti mm la croce è fuori centro fisico, somma quel delta agli offset X/Y, ristampa.
     </div>
     <div class="status status-ovr"></div>
     `}
@@ -273,6 +277,7 @@ function buildForm(index, fmt, eff, isNew) {
       if (action === 'delete-preset')   await deletePreset(index, fmt, form);
       if (action === 'save-overrides')  await saveOverride(fmt.name, form);
       if (action === 'reset-overrides') await resetOverride(fmt.name, form);
+      if (action === 'print-calibration') await printCalibration(index, fmt, form);
       if (action === 'cancel-new')      load();
     });
   });
@@ -377,6 +382,30 @@ async function saveOverride(name, form) {
     status.className = 'status status-ovr ok';
     status.textContent = 'Salvato.';
     render();
+  } catch (e) {
+    status.className = 'status status-ovr err';
+    status.textContent = 'Errore: ' + e.message;
+  }
+}
+
+async function printCalibration(index, fmt, form) {
+  if (!confirm(`Stampare il pattern di calibrazione su "${fmt.name}"?\n\nUserà gli offset attualmente salvati per il preset.`)) return;
+  const status = form.querySelector('.status-ovr');
+  status.className = 'status status-ovr';
+  status.textContent = 'Invio…';
+  status.style.display = 'block';
+  try {
+    const res = await fetch('/api/print_calibration', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({format: index}),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.message || data.error || 'HTTP ' + res.status);
+    const o = data.offsets || {};
+    const a = o.applied || [0, 0];
+    status.className = 'status status-ovr ok';
+    status.textContent = `Inviato. Offset applicati: X=${a[0].toFixed(2)} Y=${a[1].toFixed(2)} mm (auto ${(o.auto||[0,0])[1].toFixed(2)} + utente ${(o.user||[0,0])[1].toFixed(2)} su Y).`;
   } catch (e) {
     status.className = 'status status-ovr err';
     status.textContent = 'Errore: ' + e.message;

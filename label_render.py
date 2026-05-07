@@ -307,6 +307,78 @@ def render(fmt, runs=None,
     return _apply_offset(img, offset_x_mm, offset_y_mm)
 
 
+def render_calibration(fmt, offset_x_mm=0.0, offset_y_mm=0.0):
+    """Render a calibration pattern for a preset: frame around the imageable
+    area, centred crosshair (so it lands on the *paper* centre after
+    auto-compensation), and 1 mm / 5 mm rulers on all four sides.
+
+    Stamp it, measure how far the cross is from the physical centre of the
+    label, and put that delta into the preset's offset_x/y_mm — repeat until
+    centred. The on-screen crosshair sits at the PNG centre and the apply-
+    offset step shifts the bitmap by (centring + user) mm, exactly like a
+    normal print, so what you measure on paper is exactly what the formula
+    is doing.
+
+    Tapes are continuous, so for kind='tape' we draw a 60 mm long sample.
+    """
+    if fmt.get('kind') == 'tape':
+        canvas_w_mm = 60.0
+        canvas_h_mm = float(fmt['width_mm'])
+    else:
+        canvas_w_mm, canvas_h_mm = imageable_size_mm(fmt)
+
+    w = mm_to_px(canvas_w_mm)
+    h = mm_to_px(canvas_h_mm)
+    img = Image.new('RGB', (w, h), 'white')
+    draw = ImageDraw.Draw(img)
+
+    # Frame at the imageable border
+    draw.rectangle([(0, 0), (w - 1, h - 1)], outline='black', width=2)
+
+    # Crosshair at canvas centre (= imageable centre, becomes paper centre
+    # after auto-compensation in apply_offset).
+    cx, cy = w // 2, h // 2
+    arm = mm_to_px(min(canvas_w_mm, canvas_h_mm) * 0.18)
+    draw.line([(cx - arm, cy), (cx + arm, cy)], fill='black', width=2)
+    draw.line([(cx, cy - arm), (cx, cy + arm)], fill='black', width=2)
+    r = max(2, mm_to_px(0.6))
+    draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], outline='black', width=2)
+
+    # mm rulers along all four edges
+    long_tick = mm_to_px(2.0)
+    short_tick = mm_to_px(1.0)
+    for mm in range(int(canvas_w_mm) + 1):
+        x = mm_to_px(mm)
+        if x >= w:
+            continue
+        t = long_tick if mm % 5 == 0 else short_tick
+        draw.line([(x, 0), (x, t)], fill='black', width=1)
+        draw.line([(x, h - 1 - t), (x, h - 1)], fill='black', width=1)
+    for mm in range(int(canvas_h_mm) + 1):
+        y = mm_to_px(mm)
+        if y >= h:
+            continue
+        t = long_tick if mm % 5 == 0 else short_tick
+        draw.line([(0, y), (t, y)], fill='black', width=1)
+        draw.line([(w - 1 - t, y), (w - 1, y)], fill='black', width=1)
+
+    # Caption: imageable size and applied offsets
+    label_size = max(8, mm_to_px(2.2))
+    try:
+        font = _load_font(label_size)
+    except Exception:
+        font = None
+    caption = f'{canvas_w_mm:.1f}×{canvas_h_mm:.1f}mm  ox={offset_x_mm:+.2f} oy={offset_y_mm:+.2f}'
+    if font is not None:
+        bb = draw.textbbox((0, 0), caption, font=font, anchor='lt')
+        tw = bb[2] - bb[0]
+        th = bb[3] - bb[1]
+        draw.text((cx - tw / 2, cy + arm + mm_to_px(1.5)), caption,
+                  fill='black', font=font, anchor='lt')
+
+    return _apply_offset(img, offset_x_mm, offset_y_mm)
+
+
 def _apply_offset(img, offset_x_mm, offset_y_mm):
     """Translate the rendered content by (ox, oy) mm to compensate mechanical
     printer misalignment. Pixels shifted out of frame are cropped; the freed

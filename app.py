@@ -6,7 +6,7 @@ import urllib.parse
 from flask import Flask, jsonify, request, send_from_directory
 from waitress import serve
 from dotenv import load_dotenv
-from label_render import render, resolve_cups_media, centring_offset_mm
+from label_render import render, render_calibration, resolve_cups_media, centring_offset_mm
 from printing import list_printers, print_label
 import presets_store
 import presets_catalog
@@ -146,6 +146,42 @@ def api_overrides_delete(name):
         return jsonify(presets_store.reset(name))
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/print_calibration', methods=['POST'])
+def print_calibration_endpoint():
+    """Print a calibration pattern (frame + crosshair + mm rulers) for the
+    chosen preset, applying the same offsets a normal print would. Use to
+    measure the exact mechanical residual and refine offset_x/y_mm."""
+    data = request.get_json() or {}
+    presets = presets_catalog.load()
+    fmt_index = data.get('format', 0)
+    if not (0 <= fmt_index < len(presets)):
+        return jsonify({'ok': False, 'message': 'invalid format index'}), 400
+    fmt = presets[fmt_index]
+
+    printer_name = data.get('printer_name')
+    if not printer_name:
+        printers = list_printers()
+        if not printers:
+            return jsonify({'ok': False, 'message': 'no printer available'}), 503
+        wanted = 'Tape' if fmt.get('kind') == 'tape' else 'Label'
+        printer_name = next((p['name'] for p in printers if wanted in p['name']),
+                            printers[0]['name'])
+
+    try:
+        cx_auto, cy_auto = centring_offset_mm(fmt)
+        overrides = presets_store.get(fmt['name'])
+        ox = overrides['offset_x_mm'] + cx_auto
+        oy = overrides['offset_y_mm'] + cy_auto
+        img = render_calibration(fmt, offset_x_mm=ox, offset_y_mm=oy)
+        ok, message = print_label(printer_name, img, fmt)
+        return jsonify({'ok': ok, 'message': message,
+                        'offsets': {'auto': [cx_auto, cy_auto],
+                                    'user': [overrides['offset_x_mm'], overrides['offset_y_mm']],
+                                    'applied': [ox, oy]}})
+    except Exception as e:
+        return jsonify({'ok': False, 'message': str(e)}), 500
 
 
 # ── Preset catalog CRUD ──────────────────────────────────────────────────────
