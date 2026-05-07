@@ -43,13 +43,27 @@ app.py              Flask routes + waitress runner.
                     for_print=True applica anche l'offset meccanico;
                     /api/preview usa False, /api/print usa True.
 
-label_render.py     FORMATS (lista preset). render() dispatch tra
-                    _render_label() (dimensioni fisse) e _render_tape()
-                    (lunghezza auto-fit). _layout() = binary search del
-                    font massimo che entra. _draw_lines() centra
-                    verticalmente sull'altezza visiva con anchor='lt'.
+label_render.py     FORMATS (seed dei preset built-in). render() dispatch
+                    tra _render_label (size = imageable area) e
+                    _render_tape (lunghezza auto-fit). orientation=
+                    'vertical' lavora su canvas swappato e ruota 90°.
+                    _layout() = binary search del font massimo che entra;
+                    usa _line_visual_geometry come _draw_lines, così le
+                    altezze del bin search e del rendering coincidono.
+                    PPD_IMAGEABLE_MARGINS_MM mappa le imageable areas per
+                    media DYMO; centring_offset_mm() restituisce lo shift
+                    da applicare in stampa per portare il centro logico
+                    sul centro fisico della carta. render_calibration()
+                    produce il pattern di taratura.
                     _fetch_icon() scarica SVG da Iconify e lo converte
                     in PNG via svglib (cache /tmp/dymo-web-icons/).
+
+presets_catalog.py  Catalogo MUTABILE dei preset, JSON in
+                    ~/.config/dymo-web/presets.json. Seedato da
+                    label_render.FORMATS al primo accesso. CRUD:
+                    add/update/delete con validazione, refusa di
+                    svuotare il catalogo. update() ritorna (old_name,
+                    new_name) così il chiamante migra le override.
 
 printing.py         Tre path stampa con auto-select (in ordine):
                     1. GATEWAY HTTP (LXC): se env DYMO_GATEWAY_URL è set,
@@ -70,6 +84,8 @@ presets_store.py    JSON store ~/.config/dymo-web/preset_overrides.json
                     settings.py). Per-preset overrides keyed by preset
                     'name': offset_x/y_mm, auto_fit_safety, padding_mm.
                     DEFAULTS definiscono i valori usati senza override.
+                    rename(old, new) migra la chiave quando l'utente
+                    rinomina un preset dal catalogo.
 
 history.py          Print history ring buffer
                     ~/.config/dymo-web/history.json. Cap HISTORY_MAX=200,
@@ -89,9 +105,12 @@ static/index.html   Frontend home (HTML+CSS+JS vanilla, single file).
                     e ingranaggio /presets nell'header pagina (sopra le
                     due colonne).
 
-static/presets.html Pagina /presets: lista preset, click per espandere
-                    form di override (offset, safety, padding) con
-                    Salva / Ripristina default.
+static/presets.html Pagina /presets: bottone "+ Nuovo preset" e, per
+                    ciascuno, form a due sezioni: "Caratteristiche
+                    preset" (nome/dimensioni/kind/cups_media/codice →
+                    POST/PUT/DELETE su /api/presets) e "Aggiustamenti
+                    di stampa" (i 4 valori override + bottone "Stampa
+                    calibrazione").
 
 static/history.html Pagina /history: griglia paginata 10/pagina, filtro
                     tipo (label/tape), click su una card → sessionStorage
@@ -103,8 +122,14 @@ etc/dymo-web.service Unit systemd (committata nel repo, full-recovery.sh
 scripts/
   setup-lxc.sh             Setup LXC: apt deps + venv + pip + systemd
                            unit con DYMO_GATEWAY_URL puntato al Pi.
-  setup-pi-gateway.sh      Attiva il microservice gateway sul Pi
-                           (Flask+waitress nel venv, systemd unit).
+  setup-pi-gateway.sh      Setup completo del Pi gateway da fresh Pi OS
+                           Lite: apt (cups, cups-filters, printer-driver-
+                           dymo, python3-venv), venv + Flask/waitress,
+                           lpadmin per generare le PPD in /etc/cups/ppd/,
+                           setup-pi-direct-usb, drop-in cloud-init
+                           preserve_hostname, workaround WiFi NM (vedi
+                           lessons), systemd unit, health check.
+                           Idempotente, safe to re-run.
   setup-pi-autodeploy.sh   Bare repo + post-receive hook + sudoers
                            NOPASSWD. PARAMETRICO: $1 = nome servizio
                            da restartare (default 'dymo-web', Pi usa
@@ -149,13 +174,33 @@ rompe dopo update di `printer-driver-dymo` o `cups-filters`.
 Nella prima guida l'avevo blacklistato per evitare "conflitti col driver
 DYMO". Era sbagliato: serve proprio `usblp` per esporre `/dev/usb/lpN`.
 
-### Anteprima vs stampa: due percorsi distinti per l'offset meccanico
-`offset_x_mm` / `offset_y_mm` compensano disallineamenti fisici.
-**Va applicato solo alla stampa**, NON all'anteprima: se applicato anche
-all'anteprima, l'utente vede il contenuto traslato e crede sia un bug del
-rendering. `app._render_kwargs(data, for_print=False)` azzera gli offset;
-`for_print=True` li lascia. Padding e safety invece sono applicati a
-entrambi (sono scelte di layout, non compensazioni hardware).
+### Anteprima vs stampa: gli offset valgono solo a print time
+`offset_x_mm` / `offset_y_mm` (utente) + auto-compensation PPD vanno
+applicati SOLO alla stampa, non all'anteprima — altrimenti l'utente vede
+il contenuto traslato e crede sia un bug del rendering.
+`app._render_kwargs(data, for_print=False)` azzera tutti gli offset;
+`for_print=True` somma override utente + `centring_offset_mm(fmt)`.
+Padding e safety invece sono applicati a entrambi (sono scelte di layout,
+non compensazioni hardware).
+
+### Centraggio fisico = render a imageable size + niente fit-to-page + auto-comp
+Tre cose insieme rendono la stampa centrata sull'etichetta fisica:
+1. `_render_label` lavora su un canvas dell'**imageable area** (paper
+   meno i margini hardware della PPD), non paper-size. Il driver mette
+   il bitmap nell'imageable area senza scalare.
+2. La pipeline (`printing._print_direct`, `_print_via_lp`, `gateway.py`)
+   NON passa `fit-to-page`: qualsiasi scaling re-introduce asimmetria.
+3. `_render_kwargs` somma `centring_offset_mm(fmt) = ((L-R)/2, (T-B)/2)`
+   agli offset utente quando `for_print=True`. Per la 11354 è (0,0)
+   perché simmetrica; per 99012/99010/99014/99019/11355 il margine
+   "top" della PPD è ~5–6 mm contro 1.5 mm sotto, e l'auto-comp spinge
+   il contenuto giù di ~2 mm per centrarlo fisicamente.
+
+I valori sono in `PPD_IMAGEABLE_MARGINS_MM` (label_render.py), letti
+da `/etc/cups/ppd/DYMO_LabelWriter_DUO_Label.ppd` sul Pi. Per preset
+custom (cups_media `Custom.WxHmm`) il default è (1.0, 1.5, 1.0, 1.5).
+Pattern di calibrazione stampabile da `/presets` per fine-tuning manuale
+dell'override utente.
 
 ### Duo = due stampanti CUPS distinte
 - `DYMO_LabelWriter_DUO_Label` → slot adesive
@@ -207,11 +252,15 @@ Limite: 999 (max free Iconify), default frontend 200.
 - Mappa `FONT_FACES[(bold, italic)] = (path, index)` in `label_render.py`
   inizializzata in base a `platform.system()`.
 
-### Centering verticale del testo
-`_draw_lines` usa `anchor='lt'` (top-left esatto del bbox) e centra
-sull'altezza visiva (max bbox per linea), non sull'altezza nominale del
-font. Senza questo, il testo senza descender (es. "Cavo HDMI") sembrava
-shiftato in basso perché il font lasciava sempre spazio per la 'y'.
+### Centering verticale del testo: glyph extents reali, non i metric
+`_layout` (bin search) e `_draw_lines` usano lo stesso helper
+`_line_visual_geometry`, che misura ascent+descent **dei glifi
+effettivamente presenti** nella line — non `font.getmetrics()` che è
+l'ascent della font (riserva spazio per accenti/lettere alte assenti).
+Senza questa coerenza, "TEST" tutto-maiuscolo finiva in basso (il bin
+search prenotava spazio per i descender mai disegnati). Conversione
+chiave: PIL `getbbox(text)` è anchor='la' (left, ascender top), per
+portarlo in baseline-relative serve sottrarre `font.getmetrics()[0]`.
 
 ### Il post-receive hook salta i commit data:
 Il backup notturno commit-pusha solo `data/*.json`, e il service non
@@ -224,6 +273,24 @@ si riavvia inutilmente.
 `/etc/cron.d/`. Nell'architettura distribuita LXC+Pi questo NON è
 attivo: i backup li fa Proxmox a livello container. Lo script resta
 nel repo per chi avesse bisogno della modalità Pi monolitica.
+
+### Pi OS Trixie: WiFi seed non arriva mai a NetworkManager
+Su Pi OS Lite (Bookworm/Trixie) installato con Pi Imager, cloud-init
+gira in stato `degraded done` con il warning "Could not find module
+named cc_netplan_nm_patch": il modulo che dovrebbe propagare
+`/boot/firmware/network-config` dentro NetworkManager **non esiste**
+nella distribuzione. Risultato: WiFi funziona al primo boot, sparisce
+ai successivi, `wlan0` resta DOWN, `/etc/NetworkManager/system-
+connections/` non riceve mai il profilo. Workaround in
+`setup-pi-gateway.sh`: legge SSID + PSK dal seed e crea direttamente
+un profilo NM persistente. Niente fix di cloud-init — bypass.
+
+### cloud-init di Pi Imager riapplica `hostname` ad ogni boot
+`hostnamectl set-hostname dymopi` non sopravvive al reboot: cloud-init
+rilegge `hostname: dymo` da `/boot/firmware/user-data` ogni boot. Fix:
+drop-in `/etc/cloud/cloud.cfg.d/99-preserve-hostname.cfg` con
+`preserve_hostname: true`. Non tocca la rete (testato: `wlan0` resta
+attiva). Già incluso in `setup-pi-gateway.sh`.
 
 ### Gateway pattern
 La LXC produce il PNG (con offset/safety/padding già applicati per la

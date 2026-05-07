@@ -23,13 +23,16 @@ Repo: [github.com/alexpani/dymo-web](https://github.com/alexpani/dymo-web)
 - **Rich text** in `contenteditable`: seleziona una parte e applica
   grassetto / corsivo solo a quella.
 - **Allineamento** sx / centro / dx (icone stile word-processor).
+- **Orientamento** orizzontale / verticale: due iconcine (rettangolo
+  orizzontale / verticale) accanto agli allineamenti. Verticale ruota il
+  contenuto di 90° mantenendo la stessa carta fisica.
 - **Slider Dim. font**: auto-fit di default; sposta lo slider per forzare
   un valore, click "Auto" per tornare al fit automatico.
 - **Slider Interlinea** 0–100% (default 20%).
 - **Reset** azzera l'editor; **Salva bozza** mette l'etichetta in cronologia
   senza stamparla.
 - **Persistenza in localStorage**: ricarichi la pagina e ritrovi l'ultima
-  cosa che stavi scrivendo (testo, formato, decoro, slider).
+  cosa che stavi scrivendo (testo, formato, decoro, slider, orientamento).
 
 ### Decoro (mutuamente esclusivo: QR o icona)
 - **QR code** (testo o URL) o
@@ -43,15 +46,17 @@ Repo: [github.com/alexpani/dymo-web](https://github.com/alexpani/dymo-web)
   centrato sull'etichetta se non c'è testo.
 
 ### Preset
-11 preset built-in (vedi sotto). Default: **57 × 32 mm (99019)**.
+11 preset built-in seedati al primo avvio; da quel momento in poi puoi
+**aggiungere / modificare / eliminare** preset dalla UI (`/presets`).
+Default: **57 × 32 mm (11354)**.
 
 | Preset                       | Codice | Media CUPS              | Stampante  |
 | ---------------------------- | ------ | ----------------------- | ---------- |
-| 89 × 36 mm Address           | 99012  | `w101h252`              | `_Label`   |
-| 57 × 32 mm Multipurpose      | 99019  | `w162h90`               | `_Label`   |
-| 32 × 57 mm Multipurpose vert | 99019  | `w162h90`               | `_Label`   |
-| 89 × 28 mm Address Small     | 99010  | `w81h252`               | `_Label`   |
+| 89 × 36 mm Address           | 99012  | `w102h252.1` / `w101h252`| `_Label`  |
+| 57 × 32 mm Multipurpose      | 11354  | `w162h90`               | `_Label`   |
+| 89 × 28 mm Address Small     | 99010  | `w79h252.2` / `w81h252` | `_Label`   |
 | 102 × 54 mm Shipping         | 99014  | `w154h286.2`            | `_Label`   |
+| 59 × 190 mm LeverArch        | 99019  | `w167h539`              | `_Label`   |
 | 51 × 19 mm Multipurpose      | 11355  | `w54h144`               | `_Label`   |
 | 25 × 25 mm Multipurpose      | 11353  | `w72h72`                | `_Label`   |
 | Nastro 9 mm  (auto-fit)      | D1-9   | `Custom.9xLENGTHmm`     | `_Tape`    |
@@ -60,8 +65,11 @@ Repo: [github.com/alexpani/dymo-web](https://github.com/alexpani/dymo-web)
 | Nastro 24 mm (auto-fit)      | D1-24  | `Custom.24xLENGTHmm`    | `_Tape`    |
 
 I preset Tape hanno **lunghezza variabile**: il PNG viene ruotato in
-portrait e la lunghezza è calcolata dal contenuto. Cambiare/aggiungere
-preset: edita `FORMATS` in `label_render.py`.
+portrait e la lunghezza è calcolata dal contenuto. Per orientare il
+testo a 90° su un'etichetta pre-tagliata usa il toggle orientamento
+nella toolbar (non serve un preset duplicato). Catalogo serializzato in
+`~/.config/dymo-web/presets.json`; cancellalo per ri-seedare dai
+built-in.
 
 ### Cronologia
 - **Sidebar in home** con le 8 stampe più recenti come miniature.
@@ -75,14 +83,26 @@ preset: edita `FORMATS` in `label_render.py`.
 - **Color-coding**: bordo sinistro arancio = nastro, grigio = etichetta.
 
 ### Gestore preset (`/presets`)
-Per ogni preset puoi regolare:
-- **Offset stampa X / Y in mm** — compensa disallineamenti meccanici della
-  stampante. **Applicato solo alla stampa**, l'anteprima resta nominale.
+**+ Nuovo preset** in cima alla pagina; per ciascun preset esistente,
+click per espandere un form a due sezioni:
+
+**Caratteristiche preset** (modificano il catalogo)
+- Nome, dimensioni in mm, tipo (etichetta / nastro D1), CUPS media,
+  codice. Salva → aggiorna `~/.config/dymo-web/presets.json`. Elimina →
+  rimuove dal catalogo (e le sue override). Rinominare un preset
+  preserva le sue override (la chiave nel file overrides viene migrata).
+
+**Aggiustamenti di stampa** (override per preset)
+- **Offset stampa X / Y in mm** — fine-tuning manuale del centraggio.
+  Si somma alla compensation automatica calcolata dai margini PPD.
+  Applicato solo alla stampa (anteprima resta centrata sull'imageable).
 - **Margine auto-fit** (0–50%) — riduzione del font massimo per più aria.
 - **Padding interno** (mm) — spazio bianco intorno a testo/decoro.
+- **Stampa calibrazione** — stampa una griglia con cornice, croce
+  centrale e righelli mm (vedi sezione "Centraggio fisico" sotto).
 
-Override salvati in `~/.config/dymo-web/preset_overrides.json`.
-Sono **server-side authoritative**: cambi una volta, valgono per tutti i
+Override salvati in `~/.config/dymo-web/preset_overrides.json`. Sono
+**server-side authoritative**: cambi una volta, valgono per tutti i
 client (Mac + iPhone) senza dover passare nulla nel payload.
 
 ### Indicatori
@@ -175,25 +195,25 @@ driver DYMO sulla LXC.
 
 ### B) Pi gateway
 
-Prerequisiti: Pi 4 con Pi OS Lite 64-bit, hostname `dymopi`, utente
-`alexpani`, DYMO Duo collegata via USB.
+Prerequisiti: Pi 4 con Pi OS Lite 64-bit (custom settings di Pi Imager:
+hostname `dymopi`, utente `alexpani`, SSH con la tua chiave pubblica del
+Mac, WiFi configurata), DYMO Duo collegata via USB.
 
 ```bash
-# Sul Pi, da zero (recovery script completo)
+# Dal Mac
 ssh alexpani@dymopi.local
-sudo apt-get install -y git
+sudo apt update && sudo apt install -y git
 git clone https://github.com/alexpani/dymo-web.git ~/dymo-web
-~/dymo-web/scripts/full-recovery.sh
-
-# Quindi attiva il gateway (microservice porta 5051)
 ~/dymo-web/scripts/setup-pi-gateway.sh
-
-# Stop l'app monolitica (ridondante con la LXC ora)
-sudo systemctl disable --now dymo-web
 ```
 
-Il `full-recovery.sh` continua a fare anche il setup full-app (storica,
-utile per scenari senza LXC). Sul gateway-only basta `setup-pi-gateway.sh`.
+`setup-pi-gateway.sh` è idempotente da Pi vergine: installa
+`cups`/`cups-filters`/`printer-driver-dymo`/`python3-venv`, crea il venv
+con Flask+waitress, genera le PPD via `lpadmin`, configura usblp + udev
++ gruppo lp, installa il drop-in cloud-init `preserve_hostname` (così
+l'hostname sopravvive al reboot), bypassa il bug WiFi di Pi OS Trixie
+(crea il profilo NM dal seed `/boot/firmware/network-config`), attiva
+`dymo-gateway.service` su porta 5051 e fa l'health check.
 
 ### C) Auto-deploy dal Mac (triple-push)
 
@@ -236,27 +256,51 @@ fallback CUPS `lp` viene usato automaticamente — niente direct-USB.
 
 ---
 
-## Tarare l'offset di stampa
+## Centraggio fisico delle stampe
 
-Se la stampa esce sistematicamente spostata:
+L'app centra automaticamente il contenuto sull'etichetta fisica
+combinando tre meccanismi:
 
-1. Stampa una etichetta di test con un contenuto centrato (es. solo
-   `Centro`).
-2. Misura lo scostamento col righello (in che direzione, quanti mm).
-3. Apri `http://dymo.local:5050/presets`, click sul preset.
-4. **Offset X**: positivo sposta a destra, negativo a sinistra.
-   **Offset Y**: positivo giù, negativo su. Step 0.1 mm.
-5. Salva e ristampa.
+1. Il PNG viene renderizzato alle **dimensioni esatte dell'imageable
+   area** (paper meno i margini hardware della PPD), così la pipeline
+   non scala niente.
+2. La pipeline di stampa **non usa `fit-to-page`**: il bitmap arriva al
+   driver as-is, niente distorsioni asimmetriche.
+3. **Compensazione automatica** dei margini PPD asimmetrici: per le
+   etichette DYMO il margine top è ~5–6 mm contro 1.5 mm sotto (sensor
+   di leading edge); l'app shifta il bitmap di `(margin_top - margin_bottom)/2`
+   verso il basso in stampa per portare il centro logico del contenuto
+   sul centro fisico dell'etichetta.
 
-L'**anteprima resta nominale** durante la taratura (l'offset è una
-compensazione meccanica della stampante, non una modifica del layout).
+Per la 11354 i margini PPD sono simmetrici → compensation = 0; per gli
+altri preset la compensation viene applicata in automatico.
+
+### Fine-tuning con il pattern di calibrazione
+
+Se la stampa esce ancora leggermente spostata (tolleranze meccaniche
+della stampante o margini PPD non perfettamente accurati):
+
+1. Apri `http://dymo.local:5050/presets`, click sul preset.
+2. Sezione **Aggiustamenti di stampa** → **Stampa calibrazione**:
+   stampa una griglia con cornice esterna, croce centrale e righelli
+   mm sui 4 lati.
+3. Misura sull'etichetta fisica di quanti mm la croce è fuori dal
+   centro reale.
+4. Somma quel delta a **Offset X / Y** (X positivo = destra, Y positivo
+   = giù; step 0.1 mm), salva.
+5. Ristampa la calibrazione per verifica. Di solito converge in 1–2
+   iterazioni.
+
+L'**anteprima resta centrata sull'imageable area** (non si vede la
+compensation): è un dettaglio della stampa fisica, non del layout.
 
 ---
 
 ## Backup + Disaster recovery
 
-Stato vivo sulla LXC: `~/.config/dymo-web/preset_overrides.json` (taratura)
-e `history.json` (cronologia con miniature).
+Stato vivo sulla LXC: `~/.config/dymo-web/presets.json` (catalogo preset
+mutabile), `preset_overrides.json` (taratura) e `history.json`
+(cronologia con miniature).
 
 **Backup**: gestiti da Proxmox a livello di container (snapshot e
 replication, configurati nella console PVE — niente cron applicativo).
@@ -266,7 +310,7 @@ replication, configurati nella console PVE — niente cron applicativo).
 | Cosa muore | Cosa fare | Tempo | Dati persi |
 |---|---|---|---|
 | LXC | Rollback all'ultimo snapshot da Proxmox | ~10 s | ≤ frequenza snapshot |
-| SD del Pi | Reflash + `~/dymo-web/scripts/setup-pi-gateway.sh` | ~5 min | **zero** (sono sulla LXC) |
+| SD del Pi | Pi Imager + `git clone` + `~/dymo-web/scripts/setup-pi-gateway.sh` | ~10 min | **zero** (sono sulla LXC) |
 | Code corrotto sul Pi | `git push origin main` dal Mac riallinea | <2 s | nessuno |
 | Tutto contemporaneamente | Restore snapshot LXC + reflash + setup Pi | ~10 min | ≤ frequenza snapshot |
 
@@ -328,8 +372,11 @@ Per uso permanente, vai sul Pi.
 ```
 app.py                  Flask app principale (sulla LXC)
 gateway.py              Microservice USB sul Pi (porta 5051, ~80 righe Flask)
-label_render.py         FORMATS + render() + Iconify fetch
+label_render.py         FORMATS (seed) + render() + render_calibration()
+                        + helpers imageable_size_mm / centring_offset_mm
+                        + Iconify fetch
 printing.py             Tre path: gateway HTTP > direct-USB > lp (Mac)
+presets_catalog.py      JSON store mutabile del catalogo preset (CRUD)
 presets_store.py        JSON store delle override per-preset
 history.py              Ring buffer della cronologia stampe (cap 200)
 requirements.txt        Flask, waitress, Pillow, qrcode, svglib, reportlab,
@@ -346,10 +393,12 @@ etc/
 
 scripts/
   setup-lxc.sh             Setup app sulla LXC (deps + venv + systemd)
-  setup-pi-gateway.sh      Attiva il gateway sul Pi (porta 5051)
+  setup-pi-gateway.sh      Setup completo del Pi gateway da fresh Pi OS Lite
+                           (apt, venv, PPD, direct-usb, cloud-init drop-in,
+                           workaround WiFi NM, systemd unit, health check)
   setup-pi-direct-usb.sh   usblp + udev + gruppo lp + cupsdisable
   setup-pi-autodeploy.sh   Bare repo + post-receive hook + sudoers (parametrico)
-  full-recovery.sh         One-shot completo per un Pi vergine (legacy ma utile)
+  full-recovery.sh         One-shot completo per Pi monolitico storico (legacy)
   setup-cron-backup.sh     Legacy (cron+GitHub backup); non usato in LXC mode
   backup-data.sh           Legacy (per setup-cron-backup); non usato in LXC mode
   update-deps.sh           apt + pip dopo cambio requirements
