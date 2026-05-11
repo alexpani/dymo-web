@@ -47,6 +47,8 @@
     border-radius: 10px; padding: 0.6rem;
     position: relative; cursor: pointer;
     transition: border-color 0.15s, transform 0.1s;
+    display: flex; flex-direction: column;
+    min-height: 180px;
   }
   .card:hover { border-color: var(--accent); }
   .card.tape  { border-left-color: #ed8a00; }
@@ -58,7 +60,8 @@
     background: white;
   }
   .card-meta {
-    margin-top: 0.4rem; font-size: 0.75rem; color: var(--muted);
+    margin-top: auto;
+    padding-top: 0.4rem; font-size: 0.75rem; color: var(--muted);
     display: flex; justify-content: space-between; gap: 0.5rem;
   }
   .card-code { font-weight: 500; color: var(--text); }
