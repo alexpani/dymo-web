@@ -42,10 +42,16 @@ app.py              Flask routes + waitress runner.
                     corrente leggendoli da presets_store.
                     for_print=True applica anche l'offset meccanico;
                     /api/preview usa False, /api/print usa True.
+                    _tape_length_mm() valida/clampa la lunghezza nastro
+                    richiesta; /api/formats espone dead_zone_mm e i
+                    min/max ai preset tape, così il frontend non
+                    duplica la geometria.
 
 label_render.py     FORMATS (seed dei preset built-in). render() dispatch
                     tra _render_label (size = imageable area) e
-                    _render_tape (lunghezza auto-fit). orientation=
+                    _render_tape (lunghezza auto-fit, oppure fissa se
+                    length_mm: allora length_mm è il nastro TOTALE e si
+                    disegna length_mm - TAPE_DEAD_ZONE_MM). orientation=
                     'vertical' lavora su canvas swappato e ruota 90°.
                     _layout() = binary search del font massimo che entra;
                     usa _line_visual_geometry come _draw_lines, così le
@@ -201,6 +207,34 @@ da `/etc/cups/ppd/DYMO_LabelWriter_DUO_Label.ppd` sul Pi. Per preset
 custom (cups_media `Custom.WxHmm`) il default è (1.0, 1.5, 1.0, 1.5).
 Pattern di calibrazione stampabile da `/presets` per fine-tuning manuale
 dell'override utente.
+
+### Il nastro D1 si mangia 21.17 mm fissi, e la PPD lo nega sui custom
+La testina di stampa sta ~10.6 mm a monte della taglierina: ogni etichetta
+tagliata ha quindi un tratto bianco in testa (nastro già passato davanti
+alla testina) e uno in coda (avanzamento per portare la fine dello stampato
+sotto la lama). Sono **30 punti per lato = 21.17 mm totali**, simmetrici
+(verificato col righello).
+
+La PPD del nastro lo dichiara per i media a nome — `*ImageableArea w26h252:
+"2.80 30.00 22.80 222.00"` su una `*PaperDimension` di 252 pt, cioè 30 pt
+tagliati sotto e 30 sopra — ma per i formati custom dichiara
+`*HWMargins: 0 0 0 0`, che **è falso**: il meccanismo consuma il nastro
+comunque. Siccome `_print_args` costruisce `Custom.WxLmm`, la nostra
+pipeline cadeva esattamente in quella bugia: chiedendo 40 mm ne uscivano 60.
+
+Perciò `render(length_mm=...)` interpreta il valore come **nastro totale
+misurato col righello** e `_render_tape` disegna `length_mm -
+TAPE_DEAD_ZONE_MM`. Minimo accettato 31.2 mm (zona morta + 10 mm di
+stampabile). Testato su 40/50/60/70 mm: precisi a ±1 mm.
+
+Il bianco è simmetrico, quindi il centro dello stampato coincide col centro
+dell'etichetta tagliata: **non serve nessun offset di compensazione**. Se un
+giorno risultasse asimmetrico, quello sì andrebbe compensato.
+
+Diagnostica utile (non stampa niente): far girare `imagetoraster` sul Pi con
+`media=Custom.9x40mm` stampa `DEBUG: Page = 26x113; 0,0 to 26,113` — 113 pt
+= 39.9 mm interamente "stampabile" secondo CUPS. Cioè: il PNG e il raster
+sono giusti, l'errore sta a valle nel meccanismo.
 
 ### Duo = due stampanti CUPS distinte
 - `DYMO_LabelWriter_DUO_Label` → slot adesive

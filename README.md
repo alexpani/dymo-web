@@ -26,13 +26,22 @@ Repo: [github.com/alexpani/dymo-web](https://github.com/alexpani/dymo-web)
 - **Orientamento** orizzontale / verticale: due iconcine (rettangolo
   orizzontale / verticale) accanto agli allineamenti. Verticale ruota il
   contenuto di 90° mantenendo la stessa carta fisica.
+- **Campo Lunghezza** (solo preset nastro, sotto il formato): vuoto =
+  lunghezza automatica sul contenuto, come prima. Con un valore, l'etichetta
+  esce lunga **esattamente quei mm, righello alla mano**, e il testo si
+  rimpicciolisce (e va a capo) per starci. Minimo 31.2 mm, perché la
+  stampante lascia sempre ~21 mm di nastro bianco — 10.6 in testa e 10.6 in
+  coda, per via della distanza tra testina e taglierina — e sotto quella
+  soglia non resterebbe spazio stampabile. L'anteprima mostra solo la parte
+  stampabile; la riga sotto di essa scrive entrambi i numeri.
 - **Slider Dim. font**: auto-fit di default; sposta lo slider per forzare
   un valore, click "Auto" per tornare al fit automatico.
 - **Slider Interlinea** 0–100% (default 20%).
 - **Reset** azzera l'editor; **Salva bozza** mette l'etichetta in cronologia
   senza stamparla.
 - **Persistenza in localStorage**: ricarichi la pagina e ritrovi l'ultima
-  cosa che stavi scrivendo (testo, formato, decoro, slider, orientamento).
+  cosa che stavi scrivendo (testo, formato, decoro, slider, orientamento,
+  lunghezza nastro).
 
 ### Decoro (mutuamente esclusivo: QR o icona)
 - **QR code** (testo o URL) o
@@ -65,7 +74,8 @@ Default: **57 × 32 mm (11354)**.
 | Nastro 24 mm (auto-fit)      | D1-24  | `Custom.24xLENGTHmm`    | `_Tape`    |
 
 I preset Tape hanno **lunghezza variabile**: il PNG viene ruotato in
-portrait e la lunghezza è calcolata dal contenuto. Per orientare il
+portrait e la lunghezza è calcolata dal contenuto, oppure fissata dal
+campo "Lunghezza" (vedi sopra). Per orientare il
 testo a 90° su un'etichetta pre-tagliata usa il toggle orientamento
 nella toolbar (non serve un preset duplicato). Catalogo serializzato in
 `~/.config/dymo-web/presets.json`; cancellalo per ri-seedare dai
