@@ -31,6 +31,26 @@ def get_formats():
         for i, fmt in enumerate(presets_catalog.load())
     ])
 
+TAPE_LENGTH_MIN_MM = 10.0
+TAPE_LENGTH_MAX_MM = 1400.0  # CUPS continuous media tops out around 1411 mm
+
+
+def _tape_length_mm(data):
+    """Fixed tape length requested by the client, or None for auto-fit.
+    Clamped: a length under ~10 mm can't hold a glyph, and over the CUPS
+    continuous-media cap the driver would truncate the job."""
+    raw = data.get('length_mm')
+    if raw in (None, '', 0):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return min(max(value, TAPE_LENGTH_MIN_MM), TAPE_LENGTH_MAX_MM)
+
+
 def _render_kwargs(data, for_print=False):
     """
     Build render() kwargs from the API payload + per-preset overrides.
@@ -68,6 +88,7 @@ def _render_kwargs(data, for_print=False):
         'align': data.get('align', 'center'),
         'orientation': data.get('orientation', 'horizontal'),
         'font_size_pt': data.get('font_size_pt') or None,
+        'length_mm': _tape_length_mm(data),
         'line_spacing': data.get('line_spacing') if data.get('line_spacing') is not None else 0.2,
         # per-preset overrides (server-side authoritative)
         'auto_fit_safety': overrides['auto_fit_safety'],

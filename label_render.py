@@ -254,7 +254,7 @@ def render(fmt, runs=None,
            decor='none', qr_content='', icon_id='', decor_position='left',
            align='center', font_size_pt=None,
            auto_fit_safety=0.0, padding_mm=2.0, line_spacing=0.2,
-           offset_x_mm=0.0, offset_y_mm=0.0,
+           offset_x_mm=0.0, offset_y_mm=0.0, length_mm=None,
            text='', bold=False, italic=False, orientation='horizontal',
            # legacy aliases (older clients / curl scripts):
            qr_enabled=False, qr_position=None):
@@ -271,6 +271,8 @@ def render(fmt, runs=None,
     runs:            list of {text, bold, italic}; '\\n' splits paragraphs
     align:           text alignment within its area
     font_size_pt:    int forced size, or None for auto-fit
+    length_mm:       tape only — fixed tape length in mm; the text shrinks
+                     (and wraps) to fit it. None = length auto-fit to content.
     orientation:     'horizontal' (default) or 'vertical' — when vertical the
                      content is laid out on a swapped canvas (height × width)
                      and rotated 90° before output, so the printed paper
@@ -289,7 +291,7 @@ def render(fmt, runs=None,
 
     if fmt.get('kind') == 'tape':
         img = _render_tape(fmt, runs, align, font_size_pt,
-                           auto_fit_safety, padding_mm, line_spacing)
+                           auto_fit_safety, padding_mm, line_spacing, length_mm)
     else:
         # Render at the imageable size (paper minus PPD hardware margins),
         # so the print pipeline can ship the PNG as-is — no fit-to-page,
@@ -537,10 +539,17 @@ def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
 
 
 def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
-                 padding_mm=2.0, line_spacing=0.2):
+                 padding_mm=2.0, line_spacing=0.2, length_mm=None):
     """
-    Tape: width fixed (= tape width), length auto-fit. Computes the largest
-    font that fits vertically, then sizes the canvas length to the longest line.
+    Tape: width fixed (= tape width), length either auto-fit to the content
+    (length_mm=None) or pinned to length_mm.
+
+    Auto-fit computes the largest font that fits vertically, then sizes the
+    canvas length to the longest line. With a fixed length the length becomes
+    a layout constraint instead: _layout binary-searches a font that fits both
+    the tape width *and* the requested length, wrapping when it has to.
+    The print pipeline derives the CUPS media length from the PNG, so a fixed
+    canvas is all it takes to get exactly that much tape.
 
     padding_mm is split: ~75% horizontally (along the tape) and 50% vertically
     (across the narrow tape width — even less air would crowd the glyphs).
@@ -553,22 +562,29 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
     pad_long = mm_to_px(padding_mm)
     text_h = height_px - 2 * pad_short
 
+    fixed_length_px = mm_to_px(length_mm) if length_mm else None
+
     if not any((r.get('text') or '').strip() for r in runs):
-        return Image.new('RGB', (min_length_px, height_px), 'white')
+        return Image.new('RGB', (fixed_length_px or min_length_px, height_px), 'white')
 
-    # No-wrap layout: each paragraph is its own line, width unconstrained.
-    size, lines, line_h = _layout(runs, max_length_px, text_h, font_size_pt,
-                                  auto_fit_safety, line_spacing)
-
-    tmp_img = Image.new('RGB', (1, 1))
-    tmp_draw = ImageDraw.Draw(tmp_img)
-    get_font = _font_cache(size)
-    widest = max(
-        (sum(tmp_draw.textlength(fr['text'], font=get_font(fr['bold'], fr['italic'])) for fr in line)
-         for line in lines if line),
-        default=0,
-    )
-    width_px = max(min_length_px, int(widest) + 2 * pad_long)
+    if fixed_length_px:
+        text_w = max(10, fixed_length_px - 2 * pad_long)
+        size, lines, line_h = _layout(runs, text_w, text_h, font_size_pt,
+                                      auto_fit_safety, line_spacing)
+        get_font = _font_cache(size)
+        width_px = fixed_length_px
+    else:
+        # No-wrap layout: each paragraph is its own line, width unconstrained.
+        size, lines, line_h = _layout(runs, max_length_px, text_h, font_size_pt,
+                                      auto_fit_safety, line_spacing)
+        tmp_draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+        get_font = _font_cache(size)
+        widest = max(
+            (sum(tmp_draw.textlength(fr['text'], font=get_font(fr['bold'], fr['italic'])) for fr in line)
+             for line in lines if line),
+            default=0,
+        )
+        width_px = max(min_length_px, int(widest) + 2 * pad_long)
 
     img = Image.new('RGB', (width_px, height_px), 'white')
     draw = ImageDraw.Draw(img)

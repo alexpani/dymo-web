@@ -357,6 +357,7 @@
     margin-top: 0.6rem;
   }
   .size-row input[type="range"] { flex: 1; }
+  .size-row input[type="number"] { flex: 1; min-width: 0; }
   .size-row .size-label {
     font-size: 0.85rem;
     color: var(--muted);
@@ -388,6 +389,11 @@
   <div class="card">
     <label for="format">Formato etichetta</label>
     <select id="format"></select>
+    <div class="size-row" id="tape_length_row" hidden>
+      <label for="tape_length" style="margin:0">Lunghezza</label>
+      <input type="number" id="tape_length" min="10" max="1400" step="1" placeholder="Auto">
+      <span class="size-label">mm</span>
+    </div>
   </div>
 
   <div class="card">
@@ -596,6 +602,7 @@ async function loadFormats() {
   // Trigger printer auto-selection for the (possibly default) preset
   const fmt = formats[parseInt(sel.value, 10)];
   if (fmt) selectPrinterFor(fmt.kind || 'label');
+  syncTapeLengthRow();
 }
 
 const state = { align: 'center', orientation: 'horizontal', decor: 'none', icon_id: '' };
@@ -650,6 +657,18 @@ function extractRuns(root) {
   return out;
 }
 
+// Fixed tape length in mm, or null for auto-fit. Only tapes have a variable
+// length: for pre-cut labels the field is hidden and the value ignored.
+function tapeLengthValue() {
+  const v = parseFloat($('tape_length').value);
+  return v > 0 ? v : null;
+}
+
+function syncTapeLengthRow() {
+  const fmt = formats[parseInt($('format').value, 10)];
+  $('tape_length_row').hidden = !fmt || fmt.kind !== 'tape';
+}
+
 function getPayload() {
   const sliderVal = parseInt($('font_size').value, 10);
   return {
@@ -663,6 +682,7 @@ function getPayload() {
     orientation: state.orientation,
     font_size_pt: sliderVal > 0 ? sliderVal : null,
     line_spacing: parseInt($('line_spacing').value, 10) / 100,
+    length_mm: tapeLengthValue(),
   };
 }
 
@@ -677,7 +697,7 @@ async function updatePreview() {
   const payload = getPayload();
   const fmt = formats[payload.format];
   $('preview_meta').textContent = fmt.kind === 'tape'
-    ? `Nastro ${fmt.width_mm} mm — auto-fit — ${fmt.code}`
+    ? `Nastro ${fmt.width_mm} mm — ${payload.length_mm ? payload.length_mm + ' mm' : 'auto-fit'} — ${fmt.code}`
     : `${fmt.width_mm} × ${fmt.height_mm} mm — ${fmt.code}`;
 
   try {
@@ -722,6 +742,7 @@ function saveDraftLocal() {
       orientation:    state.orientation,
       font_size_pt:   parseInt($('font_size').value, 10),
       line_spacing:   parseInt($('line_spacing').value, 10),
+      length_mm:      tapeLengthValue(),
     };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   } catch (e) {}
@@ -737,6 +758,8 @@ function loadDraftLocal() {
       const fmt = formats[d.format];
       if (fmt) selectPrinterFor(fmt.kind || 'label');
     }
+    $('tape_length').value = d.length_mm || '';
+    syncTapeLengthRow();
     $('text').innerHTML = d.text_html || '';
     setDecorMode(d.decor || 'none');
     $('qr_content').value = d.qr_content || '';
@@ -786,6 +809,8 @@ function resetEditor() {
     $('format').value = def.index;
     selectPrinterFor(def.kind || 'label');
   }
+  $('tape_length').value = '';
+  syncTapeLengthRow();
   updatePreview();
 }
 
@@ -834,8 +859,10 @@ async function doPrint() {
 $('format').addEventListener('change', () => {
   const fmt = formats[parseInt($('format').value, 10)];
   if (fmt) selectPrinterFor(fmt.kind || 'label');
+  syncTapeLengthRow();
   schedulePreview();
 });
+$('tape_length').addEventListener('input', schedulePreview);
 $('text').addEventListener('input', () => { syncFormatButtons(); schedulePreview(); });
 $('text').addEventListener('keyup', syncFormatButtons);
 $('text').addEventListener('mouseup', syncFormatButtons);
@@ -1017,6 +1044,8 @@ function applyPayload(payload) {
     const fmt = formats[payload.format];
     if (fmt) selectPrinterFor(fmt.kind || 'label');
   }
+  $('tape_length').value = payload.length_mm || '';
+  syncTapeLengthRow();
   $('text').innerHTML = runsToHtml(payload.runs);
   setDecorMode(payload.decor || 'none');
   $('qr_content').value = payload.qr_content || '';
