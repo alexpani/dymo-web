@@ -6,6 +6,7 @@ import urllib.parse
 from flask import Flask, jsonify, request, send_from_directory
 from waitress import serve
 from dotenv import load_dotenv
+import label_render
 from label_render import render, render_calibration, resolve_cups_media, centring_offset_mm
 from printing import list_printers, print_label
 import presets_store
@@ -25,20 +26,28 @@ def index():
 def get_formats():
     """Return the current preset catalog. cups_media is resolved to the
     string appropriate for the current platform (PPDs differ between macOS
-    and Linux)."""
-    return jsonify([
-        {'index': i, **fmt, 'cups_media': resolve_cups_media(fmt)}
-        for i, fmt in enumerate(presets_catalog.load())
-    ])
+    and Linux). Tape presets also carry the tape-length bounds, so the editor
+    doesn't have to hardcode a copy of the dead-zone geometry."""
+    out = []
+    for i, fmt in enumerate(presets_catalog.load()):
+        item = {'index': i, **fmt, 'cups_media': resolve_cups_media(fmt)}
+        if fmt.get('kind') == 'tape':
+            item['dead_zone_mm'] = round(label_render.TAPE_DEAD_ZONE_MM, 2)
+            item['min_length_mm'] = TAPE_LENGTH_MIN_MM
+            item['max_length_mm'] = TAPE_LENGTH_MAX_MM
+        out.append(item)
+    return jsonify(out)
 
-TAPE_LENGTH_MIN_MM = 10.0
-TAPE_LENGTH_MAX_MM = 1400.0  # CUPS continuous media tops out around 1411 mm
+# Bounds on the *total* tape length (what the user measures), so they include
+# the dead zone the printer adds. Below the minimum there'd be no printable run
+# left; above the maximum the CUPS continuous media (~1411 mm) would truncate.
+TAPE_LENGTH_MIN_MM = round(label_render.TAPE_DEAD_ZONE_MM
+                           + label_render.TAPE_MIN_PRINTABLE_MM, 1)  # 31.2 mm
+TAPE_LENGTH_MAX_MM = 1400.0
 
 
 def _tape_length_mm(data):
-    """Fixed tape length requested by the client, or None for auto-fit.
-    Clamped: a length under ~10 mm can't hold a glyph, and over the CUPS
-    continuous-media cap the driver would truncate the job."""
+    """Total tape length requested by the client, or None for auto-fit."""
     raw = data.get('length_mm')
     if raw in (None, '', 0):
         return None

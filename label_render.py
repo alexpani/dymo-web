@@ -80,6 +80,19 @@ PPD_IMAGEABLE_MARGINS_MM = {
 }
 DEFAULT_IMAGEABLE_MARGINS_MM = (1.0, 1.5, 1.0, 1.5)  # safe DYMO label default
 
+# ── Tape dead zone ───────────────────────────────────────────────────────────
+# The D1 printhead sits ~10.6 mm upstream of the cutter, so every cut label
+# carries a blank leader (tape that passed the head before printing started)
+# and a blank trailer (fed to bring the end of the print to the blade). The
+# tape PPD declares exactly that for its named media — ImageableArea leaves
+# 30 pt at each end of the page — but for Custom.WxHmm sizes it claims
+# '*HWMargins: 0 0 0 0', which the mechanism does not honour: it eats the
+# tape anyway. So a Custom.9x40mm page comes out ~61 mm long.
+# We subtract it here: length_mm is the tape the user wants in hand, and the
+# canvas we render is what's left to print on.
+TAPE_DEAD_ZONE_MM = 2 * (30 / 72 * 25.4)  # 30 pt leader + 30 pt trailer = 21.17 mm
+TAPE_MIN_PRINTABLE_MM = 10.0              # below this a glyph has nowhere to go
+
 
 def get_imageable_margins_mm(fmt):
     """Return (left, top, right, bottom) in mm for this preset's media."""
@@ -271,8 +284,10 @@ def render(fmt, runs=None,
     runs:            list of {text, bold, italic}; '\\n' splits paragraphs
     align:           text alignment within its area
     font_size_pt:    int forced size, or None for auto-fit
-    length_mm:       tape only — fixed tape length in mm; the text shrinks
-                     (and wraps) to fit it. None = length auto-fit to content.
+    length_mm:       tape only — total tape length in mm, cut to cut, as
+                     measured with a ruler. TAPE_DEAD_ZONE_MM of that is blank
+                     leader+trailer the mechanism adds; the text shrinks (and
+                     wraps) to fit what's left. None = auto-fit to content.
     orientation:     'horizontal' (default) or 'vertical' — when vertical the
                      content is laid out on a swapped canvas (height × width)
                      and rotated 90° before output, so the printed paper
@@ -542,14 +557,17 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
                  padding_mm=2.0, line_spacing=0.2, length_mm=None):
     """
     Tape: width fixed (= tape width), length either auto-fit to the content
-    (length_mm=None) or pinned to length_mm.
+    (length_mm=None) or pinned so the cut label measures length_mm.
 
     Auto-fit computes the largest font that fits vertically, then sizes the
     canvas length to the longest line. With a fixed length the length becomes
     a layout constraint instead: _layout binary-searches a font that fits both
-    the tape width *and* the requested length, wrapping when it has to.
-    The print pipeline derives the CUPS media length from the PNG, so a fixed
-    canvas is all it takes to get exactly that much tape.
+    the tape width *and* the printable run, wrapping when it has to.
+
+    The printable run is length_mm minus TAPE_DEAD_ZONE_MM — the blank tape the
+    printer adds around every cut. The print pipeline derives the CUPS media
+    length from the PNG, so rendering the printable run is all it takes to get
+    length_mm of tape in hand.
 
     padding_mm is split: ~75% horizontally (along the tape) and 50% vertically
     (across the narrow tape width — even less air would crowd the glyphs).
@@ -562,7 +580,8 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
     pad_long = mm_to_px(padding_mm)
     text_h = height_px - 2 * pad_short
 
-    fixed_length_px = mm_to_px(length_mm) if length_mm else None
+    printable_mm = (length_mm - TAPE_DEAD_ZONE_MM) if length_mm else None
+    fixed_length_px = mm_to_px(printable_mm) if printable_mm else None
 
     if not any((r.get('text') or '').strip() for r in runs):
         return Image.new('RGB', (fixed_length_px or min_length_px, height_px), 'white')

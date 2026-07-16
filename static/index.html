@@ -391,8 +391,8 @@
     <select id="format"></select>
     <div class="size-row" id="tape_length_row" hidden>
       <label for="tape_length" style="margin:0">Lunghezza</label>
-      <input type="number" id="tape_length" min="10" max="1400" step="1" placeholder="Auto">
-      <span class="size-label">mm</span>
+      <input type="number" id="tape_length" step="1" placeholder="Auto">
+      <span class="size-label">mm totali</span>
     </div>
   </div>
 
@@ -657,16 +657,29 @@ function extractRuns(root) {
   return out;
 }
 
-// Fixed tape length in mm, or null for auto-fit. Only tapes have a variable
-// length: for pre-cut labels the field is hidden and the value ignored.
+// Total tape length in mm (cut to cut), or null for auto-fit. Only tapes have
+// a variable length: for pre-cut labels the field is hidden and value ignored.
+// Clamped to the same bounds the server enforces, so the preview and the meta
+// line show what will actually come out rather than what was typed.
 function tapeLengthValue() {
+  const fmt = formats[parseInt($('format').value, 10)];
   const v = parseFloat($('tape_length').value);
-  return v > 0 ? v : null;
+  if (!(v > 0) || !fmt || fmt.kind !== 'tape') return null;
+  return Math.min(Math.max(v, fmt.min_length_mm), fmt.max_length_mm);
 }
 
 function syncTapeLengthRow() {
   const fmt = formats[parseInt($('format').value, 10)];
-  $('tape_length_row').hidden = !fmt || fmt.kind !== 'tape';
+  const isTape = fmt && fmt.kind === 'tape';
+  $('tape_length_row').hidden = !isTape;
+  if (isTape) {
+    $('tape_length').min = fmt.min_length_mm;
+    $('tape_length').max = fmt.max_length_mm;
+    $('tape_length').title =
+      `Nastro totale, taglio compreso (min ${fmt.min_length_mm} mm). ` +
+      `La stampante lascia ${fmt.dead_zone_mm} mm di nastro bianco a inizio e fine: ` +
+      `il testo usa il resto. Vuoto = lunghezza automatica.`;
+  }
 }
 
 function getPayload() {
@@ -696,8 +709,13 @@ function syncFormatButtons() {
 async function updatePreview() {
   const payload = getPayload();
   const fmt = formats[payload.format];
+  // For tape the preview shows the printable run only; the dead zone is blank
+  // tape the printer adds, so we spell out both numbers instead of drawing it.
+  const len = payload.length_mm;
   $('preview_meta').textContent = fmt.kind === 'tape'
-    ? `Nastro ${fmt.width_mm} mm — ${payload.length_mm ? payload.length_mm + ' mm' : 'auto-fit'} — ${fmt.code}`
+    ? (len
+        ? `Nastro ${fmt.width_mm} mm — ${len} mm totali (${(len - fmt.dead_zone_mm).toFixed(1)} stampabili + ${fmt.dead_zone_mm} di bianco) — ${fmt.code}`
+        : `Nastro ${fmt.width_mm} mm — auto-fit (+${fmt.dead_zone_mm} mm di bianco) — ${fmt.code}`)
     : `${fmt.width_mm} × ${fmt.height_mm} mm — ${fmt.code}`;
 
   try {
