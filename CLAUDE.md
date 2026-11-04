@@ -373,6 +373,21 @@ millimetro di `TAPE_REGISTRATION_MM` lo copre su tutt'e due, e il 12 mm non ha
 bisogno di nessun `offset_y_mm`. Conferma anche, con un metodo che non dipende
 da stime a occhio, che la testina copre tutta la larghezza.
 
+Poi il 24 mm, che aveva `offset_y_mm: -3`. Lì la prova non è passata nemmeno
+dalla foto: basta rigenerare il PNG che è stato spedito. Conteneva già la
+cornice superiore tagliata via e 2,96 mm di bianco in fondo — quelli li
+facevamo noi con l'offset — e il nastro stampato lo riproduce con i soliti
+~0,3 mm di scarto. Quando sospetti un offset, **guarda prima il PNG che esce
+da `render_calibration`**: separa quello che fa il nostro codice da quello che
+fa il meccanismo, senza righello.
+
+Esito: azzerati gli `offset_y_mm` di tutti i nastri (il 19 per deduzione, non
+avendo quella cassetta: tre larghezze su tre danno lo stesso scarto costante).
+Nessun preset nastro ha più bisogno di compensazioni — erano tutte rattoppi a
+mano del bug punti/pixel e dei margini fraintesi. **Se un giorno ricompare un
+offset grande su un nastro, il sospetto giusto è un errore nel modello, non un
+difetto della stampante.**
+
 Resta valido dal tentativo sbagliato, e vale la pena tenerlo:
 - `max_font_pt()` misura su `LINE_INK_EM = 0.96` (maiuscola + discendente) e
   sulla sola area stampabile, padding escluso.
