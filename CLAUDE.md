@@ -64,8 +64,10 @@ label_render.py     FORMATS (seed dei preset built-in). render() dispatch
                     usa _line_visual_geometry come _draw_lines, così le
                     altezze del bin search e del rendering coincidono.
                     pt_to_px() converte i punti del cursore in pixel PIL;
-                    max_font_pt(fmt, padding_mm) dà il corpo massimo che
-                    sta in un preset (esposto da /api/formats).
+                    tape_printable_mm() dà la banda che la testina
+                    raggiunge davvero su un nastro e printable_height_mm()
+                    la generalizza alle fustellate; max_font_pt() ne ricava
+                    il corpo massimo (esposto da /api/formats).
                     PPD_IMAGEABLE_MARGINS_MM mappa le imageable areas per
                     media DYMO; centring_offset_mm() restituisce lo shift
                     da applicare in stampa per portare il centro logico
@@ -309,12 +311,57 @@ Fix: `pt_to_px()` in label_render.py, usata nel ramo a dimensione forzata di
 preset × opzioni).
 
 Corollario: il cursore non può più arrivare dove gli pare, o il testo uscirebbe
-dal nastro senza dirlo. `max_font_pt(fmt, padding_mm)` calcola il massimo che
-ci sta misurando sull'altezza delle MAIUSCOLE (CAP_HEIGHT_EM = 0.72) e non
-sull'em intero: i discendenti possono sfiorare il padding, come su una
-etichettatrice a mano. /api/formats lo espone per ogni preset (override di
-padding incluso) e `syncFontSizeUI()` ci limita lo slider — nastro 9 mm →
-23 pt, 11354 57×32 → 98 pt.
+dall'area stampabile senza dirlo. `max_font_pt(fmt)` calcola il massimo sul
+`LINE_INK_EM = 0.96`, cioè maiuscola + discendente, non sulla sola altezza
+delle maiuscole: così non è una `g` a farsi tagliare. Il padding NON viene
+sottratto — è una preferenza di layout, e un blocco troppo alto ci sborda
+dentro, mentre l'area stampabile è fisica. /api/formats lo espone per ogni
+preset e `syncFontSizeUI()` ci limita lo slider: nastro 9 mm → 20 pt,
+11354 57×32 → 85 pt.
+
+Verificato preset per preset: al massimo il testo con discendenti sta dentro,
+a massimo+1 viene tagliato. Sulla LabelManager 160 il "20" su nastro da 9 mm
+dà maiuscole da 4,26 mm contro i 5,21 mm nostri, ma non è un errore di scala:
+il rapporto 20/8 da noi è 2,45 (atteso 2,50), da lei 2,10. Cioè la
+LabelManager a 20 tronca alla misura massima che il nastro regge, in silenzio.
+A 8 pt, dove nessuna delle due è al limite, le due macchine coincidono entro
+il 5% — ed è il DejaVu della LXC che disegna le maiuscole l'1,8% più alte di
+Arial, più l'allargamento dell'inchiostro termico.
+
+### La testina non arriva ai bordi del nastro: ~1 mm per lato è cieco
+Fratello della zona morta: lì il nastro bianco sta a monte e a valle della
+stampa, qui sta ai **lati lunghi**. La PPD lo dichiara per i media a nome —
+`*ImageableArea w26h4000: "2.80 30.00 22.80 3970.00"` su una pagina da
+25.60 pt — cioè su un nastro da 9 mm la testina copre **7,06 mm**, con
+0,97 mm irraggiungibili per lato. E come per la zona morta, sui `Custom.WxLmm`
+che stampiamo davvero la PPD dichiara margini nulli e il meccanismo se ne
+infischia.
+
+Non riscala, **taglia**: a 20 pt il PNG conteneva 5,33 mm di inchiostro e sul
+nastro ne sono usciti 5,21 (se riscalasse sarebbero stati 5,33 × 7,06/9 =
+4,16). Quindi il PNG continua a essere alto quanto tutto il nastro — la
+pipeline ne ricava la larghezza del media, non si tocca — e solo il **testo**
+viene tenuto dentro `tape_printable_mm(fmt)`, centrato, visto che il taglio
+è simmetrico.
+
+Valori (banda / nastro): 9 → 7,06 mm, 12 → 9,03, 19 → 14,11, 24 → 18,06.
+Per media custom il fallback è il 75% della larghezza, che è dove cadono
+tutti e quattro (73–78%).
+
+Due conseguenze:
+- `_draw_lines` ora sborda **simmetrico** quando il blocco è più alto della
+  sua scatola (prima `max(0, ...)` lo faceva colare tutto in basso). Sul
+  nastro i bordi non sono vuoti, sono ciechi: spartire lo sbordo in due costa
+  metà da ogni lato. È anche ciò che rende stampabile un 20 pt sul 9 mm.
+- il pattern di calibrazione disegna due righe in più che marcano la banda.
+  Sulla carta la cornice esterna esce monca sui lati lunghi: è previsto, il
+  testo deve stare fra le due righe interne.
+
+Se un preset nastro ha un `auto_fit_safety` alto, quasi certamente è un
+rattoppo a mano di questo bug e ora va azzerato: sul 9 mm l'auto-fit senza
+safety produceva 8,13 mm di inchiostro su 7,06 di banda (tagliato), col 45%
+di safety 4,40 mm (troppo piccolo); ora la banda è nota e senza safety
+l'auto-fit si ferma a 6,18 mm, che è quanto ci sta.
 
 ### Centering verticale del testo: glyph extents reali, non i metric
 `_layout` (bin search) e `_draw_lines` usano lo stesso helper

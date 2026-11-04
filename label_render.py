@@ -100,6 +100,33 @@ DEFAULT_IMAGEABLE_MARGINS_MM = (1.0, 1.5, 1.0, 1.5)  # safe DYMO label default
 TAPE_DEAD_ZONE_MM = 2 * (30 / 72 * 25.4)  # 30 pt leader + 30 pt trailer = 21.17 mm
 TAPE_MIN_PRINTABLE_MM = 10.0              # below this a glyph has nowhere to go
 
+# ── Tape printable band (across the tape) ────────────────────────────────────
+# The D1 printhead is narrower than the tape it runs on. For 9 mm the tape PPD
+# declares '*ImageableArea w26h4000: "2.80 30.00 22.80 3970.00"' on a 25.60 pt
+# page: 7.06 mm of band with ~1 mm the head cannot reach on either side.
+# Same lie as the dead zone - our Custom.WxLmm pages claim no margins at all
+# and the mechanism ignores the claim. Measured on tape: a 20 pt line asked for
+# 5.33 mm of ink and printed 5.21 mm, so the bitmap is cropped at the edges,
+# not scaled down. We keep rendering the PNG at the full tape width (the print
+# pipeline derives the media width from it) and only hold the text inside this
+# band, centred - the crop is symmetric.
+TAPE_PRINTABLE_MM = {
+    'w26h4000':  7.06,   #  9 mm tape: 2.80..22.80 pt
+    'w35h4000':  9.03,   # 12 mm tape: 4.40..30.00 pt
+    'w55h4000': 14.11,   # 19 mm tape: 7.20..47.20 pt
+    'w68h4000': 18.06,   # 24 mm tape: 8.40..59.60 pt
+}
+TAPE_PRINTABLE_FRACTION = 0.75   # custom media fallback: the four widths above
+                                 # land between 73% and 78% of the tape
+
+
+def tape_printable_mm(fmt):
+    """Band the printhead can actually reach across the tape, in mm."""
+    known = TAPE_PRINTABLE_MM.get(resolve_cups_media(fmt) or '')
+    if known:
+        return known
+    return round(float(fmt['width_mm']) * TAPE_PRINTABLE_FRACTION, 2)
+
 
 def get_imageable_margins_mm(fmt):
     """Return (left, top, right, bottom) in mm for this preset's media."""
@@ -126,31 +153,31 @@ def centring_offset_mm(fmt):
     return ((L - R) / 2.0, (T - B) / 2.0)
 
 
-# Capital letters stand about 0.72 em above the baseline (Helvetica 0.717,
-# DejaVu Sans 0.729). The per-format maximum below is sized on that rather
-# than on the full em: descenders may graze the padding, exactly as they do
-# on a handheld label maker.
-CAP_HEIGHT_EM = 0.72
+# Tallest ink a normal line of text makes: cap height plus descender, 0.96 em
+# (DejaVu Sans, 'ADGUARDgp' at 20 pt inks 6.69 mm of a 7.06 mm em). The
+# per-format maximum is sized on that rather than on cap height alone, so a
+# single 'g' can't be the thing that gets cut off.
+LINE_INK_EM = 0.96
 
 
-def printable_text_height_mm(fmt, padding_mm=2.0):
-    """Height left to the text in mm, padding already subtracted. Mirrors what
-    _render_tape and _render_label carve out. For pre-cut labels we take the
-    short side, so the figure holds for orientation='vertical' too (there the
-    canvas is swapped before rendering)."""
+def printable_height_mm(fmt):
+    """Height the printer can actually put ink on, across the label or tape.
+    For pre-cut labels we take the short side of the imageable area, so the
+    figure holds for orientation='vertical' too (there the canvas is swapped
+    before rendering)."""
     if fmt.get('kind') == 'tape':
-        pad = max(0.5, padding_mm * 0.75)          # _render_tape's pad_short
-        return max(1.0, float(fmt['width_mm']) - 2 * pad)
+        return tape_printable_mm(fmt)
     i_w, i_h = imageable_size_mm(fmt)
-    return max(1.0, min(i_w, i_h) - 2 * padding_mm)
+    return max(1.0, min(i_w, i_h))
 
 
-def max_font_pt(fmt, padding_mm=2.0):
-    """Largest point size whose capitals still fit the printable height.
-    The editor caps its slider with this so a forced size can't silently run
-    off the tape."""
-    h_mm = printable_text_height_mm(fmt, padding_mm)
-    return max(6, int(h_mm / CAP_HEIGHT_EM / 25.4 * 72))
+def max_font_pt(fmt):
+    """Largest point size whose ink still lands inside the printable height,
+    descenders included. The editor caps its slider with this, so a forced size
+    can't silently run off the label. Padding is deliberately not subtracted:
+    it is a layout preference and a block too tall for it merely spills into
+    it, while the printable area is physics."""
+    return max(6, int(printable_height_mm(fmt) / LINE_INK_EM / 25.4 * 72))
 
 
 def _load_font(size, bold=False, italic=False):
@@ -386,6 +413,19 @@ def render_calibration(fmt, offset_x_mm=0.0, offset_y_mm=0.0):
     # Frame at the imageable border
     draw.rectangle([(0, 0), (w - 1, h - 1)], outline='black', width=2)
 
+    # Tapes: the head cannot reach the outer ~1 mm, so the frame's long edges
+    # come out missing on paper. Mark the band it does reach - text has to live
+    # between these two lines.
+    if fmt.get('kind') == 'tape':
+        band = mm_to_px(tape_printable_mm(fmt))
+        band_top = (h - band) // 2
+        draw.line([(0, band_top), (w - 1, band_top)], fill='black', width=2)
+        draw.line([(0, band_top + band - 1), (w - 1, band_top + band - 1)],
+                  fill='black', width=2)
+        safe_bottom = band_top + band
+    else:
+        safe_bottom = h
+
     # Crosshair at canvas centre (= imageable centre, becomes paper centre
     # after auto-compensation in apply_offset).
     cx, cy = w // 2, h // 2
@@ -424,8 +464,11 @@ def render_calibration(fmt, offset_x_mm=0.0, offset_y_mm=0.0):
         bb = draw.textbbox((0, 0), caption, font=font, anchor='lt')
         tw = bb[2] - bb[0]
         th = bb[3] - bb[1]
-        draw.text((cx - tw / 2, cy + arm + mm_to_px(1.5)), caption,
-                  fill='black', font=font, anchor='lt')
+        ty = cy + arm + mm_to_px(1.5)
+        # A narrow tape has no room under the crosshair: the caption would be
+        # clipped by the canvas, or land where the head can't print anyway.
+        if ty + th <= safe_bottom:
+            draw.text((cx - tw / 2, ty), caption, fill='black', font=font, anchor='lt')
 
     return _apply_offset(img, offset_x_mm, offset_y_mm)
 
@@ -603,16 +646,23 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
     length from the PNG, so rendering the printable run is all it takes to get
     length_mm of tape in hand.
 
+    Across the tape the text is held inside tape_printable_mm(), not the full
+    tape width: the printhead cannot reach the outer ~1 mm and would crop it.
+    The PNG still spans the whole tape (the pipeline reads the media width off
+    it) and the band is centred, because the crop is symmetric.
+
     padding_mm is split: ~75% horizontally (along the tape) and 50% vertically
-    (across the narrow tape width — even less air would crowd the glyphs).
+    (across the narrow printable band — even less air would crowd the glyphs).
     """
     height_px = mm_to_px(fmt['width_mm'])         # PNG height = tape width
+    band_px = mm_to_px(tape_printable_mm(fmt))    # what the head can reach
     min_length_px = mm_to_px(fmt['height_mm'])    # minimum PNG length
     max_length_px = mm_to_px(1400)                # cap (CUPS w*h4000 ~= 1411 mm)
 
     pad_short = mm_to_px(max(0.5, padding_mm * 0.75))
     pad_long = mm_to_px(padding_mm)
-    text_h = height_px - 2 * pad_short
+    text_h = max(10, band_px - 2 * pad_short)
+    text_y = (height_px - text_h) // 2
 
     printable_mm = (length_mm - TAPE_DEAD_ZONE_MM) if length_mm else None
     fixed_length_px = mm_to_px(printable_mm) if printable_mm else None
@@ -641,7 +691,7 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
 
     img = Image.new('RGB', (width_px, height_px), 'white')
     draw = ImageDraw.Draw(img)
-    _draw_lines(draw, lines, get_font, pad_long, pad_short,
+    _draw_lines(draw, lines, get_font, pad_long, text_y,
                 width_px - 2 * pad_long, text_h, line_h, align, line_spacing)
     return img
 
@@ -687,8 +737,12 @@ def _draw_lines(draw, lines, get_font, text_x, text_y, text_w, text_h, line_h, a
             geos.append(_line_visual_geometry(line, get_font))
     line_visual_hs = [a + d for a, d in geos]
 
+    # When the block is taller than its box (a forced size too big for the
+    # label) it has to spill. Spilling it evenly costs half as much at each
+    # edge as letting it all hang below, which matters on tape where the edges
+    # are unprintable rather than merely empty.
     total_h = sum(line_visual_hs) + sum(h * spacing for h in line_visual_hs[:-1])
-    y = text_y + max(0, (text_h - total_h) / 2)
+    y = text_y + (text_h - total_h) / 2
 
     for line, (asc, desc) in zip(lines, geos):
         lvh = asc + desc
