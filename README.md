@@ -330,7 +330,7 @@ replication, configurati nella console PVE — niente cron applicativo).
 | Cosa muore | Cosa fare | Tempo | Dati persi |
 |---|---|---|---|
 | LXC | Rollback all'ultimo snapshot da Proxmox | ~10 s | ≤ frequenza snapshot |
-| SD del Pi | Pi Imager + `git clone` + `~/dymo-web/scripts/setup-pi-gateway.sh` | ~10 min | **zero** (sono sulla LXC) |
+| SD del Pi | Reflash + script, vedi checklist sotto | ~10 min | **zero** (sono sulla LXC) |
 | Code corrotto sul Pi | `git push origin main` dal Mac riallinea | <2 s | nessuno |
 | Tutto contemporaneamente | Restore snapshot LXC + reflash + setup Pi | ~10 min | ≤ frequenza snapshot |
 
@@ -342,6 +342,45 @@ backup applicativo dentro l'app.
 `scripts/backup-data.sh` e `scripts/setup-cron-backup.sh` esistono ancora
 nel repo per chi avesse setup il Pi monolitico storico. Non sono usati
 nell'architettura LXC + Pi gateway.
+
+### SD del Pi rotta: ripristino
+
+Sulla SD non c'è niente da salvare: si rifà da zero.
+
+1. **Pi Imager** → Raspberry Pi OS Lite 64-bit. Nelle impostazioni:
+   - hostname `dymopi`, utente `alexpani`
+   - SSH attivo, con la chiave pubblica del Mac
+   - WiFi: rete **IoT**, paese IT
+2. **DYMO attaccata e accesa** (serve per generare le PPD).
+3. Dal Mac:
+   ```bash
+   ssh-keygen -R dymopi.local
+   ssh alexpani@dymopi.local
+   ```
+4. Sul Pi, **prima di qualunque riavvio** (vedi WiFi sotto):
+   ```bash
+   sudo apt install -y git
+   git clone https://github.com/alexpani/dymo-web.git ~/dymo-web
+   ~/dymo-web/scripts/setup-pi-gateway.sh
+   ~/dymo-web/scripts/setup-pi-autodeploy.sh dymo-gateway
+   ```
+5. Dal Mac: `curl http://dymopi.local:5051/health`
+
+Il Pi riprende lo stesso IP (192.168.100.112): la reservation DHCP è sul
+MAC di `wlan0`, che sta sulla scheda e non sulla SD. Sulla LXC non va
+toccato niente.
+
+**WiFi.** La rete scritta in Imager regge solo il primo boot: il
+cloud-init di Trixie non la passa a NetworkManager e al riavvio sparisce.
+Lo step 6 di `setup-pi-gateway.sh` la rende permanente leggendola dal seed
+che Imager ha appena scritto — per questo lo script va lanciato prima di
+riavviare. Se il Pi si è già riavviato ed è rimasto senza rete, entra col
+cavo ethernet e collega la WiFi a mano:
+
+```bash
+sudo nmcli device wifi rescan && sleep 5 && \
+  sudo nmcli device wifi connect "IoT" password "<PSK>"
+```
 
 ---
 
