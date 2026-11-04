@@ -446,7 +446,7 @@
 
     <div class="size-row">
       <label for="font_size" style="margin:0">Dim. font</label>
-      <input type="range" id="font_size" min="0" max="200" step="2" value="0">
+      <input type="range" id="font_size" min="0" max="48" step="1" value="0">
       <span class="size-label" id="font_size_label">Auto</span>
       <button class="toggle-btn" id="font_size_reset" title="Torna ad Auto" disabled>Auto</button>
     </div>
@@ -602,7 +602,7 @@ async function loadFormats() {
   // Trigger printer auto-selection for the (possibly default) preset
   const fmt = formats[parseInt(sel.value, 10)];
   if (fmt) selectPrinterFor(fmt.kind || 'label');
-  syncTapeLengthRow();
+  syncFormatLimits();
 }
 
 const state = { align: 'center', orientation: 'horizontal', decor: 'none', icon_id: '' };
@@ -680,6 +680,11 @@ function syncTapeLengthRow() {
       `La stampante lascia ${fmt.dead_zone_mm} mm di nastro bianco a inizio e fine: ` +
       `il testo usa il resto. Vuoto = lunghezza automatica.`;
   }
+}
+
+function syncFormatLimits() {
+  syncTapeLengthRow();
+  syncFontSizeUI();
 }
 
 function getPayload() {
@@ -777,7 +782,7 @@ function loadDraftLocal() {
       if (fmt) selectPrinterFor(fmt.kind || 'label');
     }
     $('tape_length').value = d.length_mm || '';
-    syncTapeLengthRow();
+    syncFormatLimits();
     $('text').innerHTML = d.text_html || '';
     setDecorMode(d.decor || 'none');
     $('qr_content').value = d.qr_content || '';
@@ -828,7 +833,7 @@ function resetEditor() {
     selectPrinterFor(def.kind || 'label');
   }
   $('tape_length').value = '';
-  syncTapeLengthRow();
+  syncFormatLimits();
   updatePreview();
 }
 
@@ -877,7 +882,7 @@ async function doPrint() {
 $('format').addEventListener('change', () => {
   const fmt = formats[parseInt($('format').value, 10)];
   if (fmt) selectPrinterFor(fmt.kind || 'label');
-  syncTapeLengthRow();
+  syncFormatLimits();
   schedulePreview();
 });
 $('tape_length').addEventListener('input', schedulePreview);
@@ -1021,7 +1026,15 @@ $('orientation_group').querySelectorAll('.seg').forEach(btn => {
     schedulePreview();
   });
 });
+// The usable range depends on the format: past fmt.max_font_pt the capitals
+// no longer fit the printable height and the text would be clipped with no
+// warning other than the preview.
 function syncFontSizeUI() {
+  const fmt = formats[parseInt($('format').value, 10)];
+  const max = (fmt && fmt.max_font_pt) || 48;
+  $('font_size').max = max;
+  if (parseInt($('font_size').value, 10) > max) $('font_size').value = max;
+  $('font_size').title = `0 = automatico. Massimo ${max} pt su questo formato.`;
   const v = parseInt($('font_size').value, 10);
   $('font_size_label').textContent = v > 0 ? v + ' pt' : 'Auto';
   $('font_size_reset').disabled = v === 0;
@@ -1063,7 +1076,7 @@ function applyPayload(payload) {
     if (fmt) selectPrinterFor(fmt.kind || 'label');
   }
   $('tape_length').value = payload.length_mm || '';
-  syncTapeLengthRow();
+  syncFormatLimits();
   $('text').innerHTML = runsToHtml(payload.runs);
   setDecorMode(payload.decor || 'none');
   $('qr_content').value = payload.qr_content || '';

@@ -60,6 +60,13 @@ def mm_to_px(mm):
     return int((mm / 25.4) * DPI)
 
 
+def pt_to_px(pt):
+    """Typographic points to pixels on the 300 DPI canvas. PIL sizes fonts in
+    pixels, so handing it points straight rendered them 300/72 = 4.17x too
+    small: a '20 pt' label came out 1.7 mm tall instead of 7.1 mm."""
+    return max(1, int(round(float(pt) / 72.0 * DPI)))
+
+
 # ── PPD imageable area (in mm) ────────────────────────────────────────────────
 # Values read from /etc/cups/ppd/DYMO_LabelWriter_DUO_Label.ppd on the Pi.
 # Tuple is (left, top, right, bottom). For pre-cut labels DYMO leaves a sizeable
@@ -117,6 +124,33 @@ def centring_offset_mm(fmt):
     For symmetric margins this is (0, 0)."""
     L, T, R, B = get_imageable_margins_mm(fmt)
     return ((L - R) / 2.0, (T - B) / 2.0)
+
+
+# Capital letters stand about 0.72 em above the baseline (Helvetica 0.717,
+# DejaVu Sans 0.729). The per-format maximum below is sized on that rather
+# than on the full em: descenders may graze the padding, exactly as they do
+# on a handheld label maker.
+CAP_HEIGHT_EM = 0.72
+
+
+def printable_text_height_mm(fmt, padding_mm=2.0):
+    """Height left to the text in mm, padding already subtracted. Mirrors what
+    _render_tape and _render_label carve out. For pre-cut labels we take the
+    short side, so the figure holds for orientation='vertical' too (there the
+    canvas is swapped before rendering)."""
+    if fmt.get('kind') == 'tape':
+        pad = max(0.5, padding_mm * 0.75)          # _render_tape's pad_short
+        return max(1.0, float(fmt['width_mm']) - 2 * pad)
+    i_w, i_h = imageable_size_mm(fmt)
+    return max(1.0, min(i_w, i_h) - 2 * padding_mm)
+
+
+def max_font_pt(fmt, padding_mm=2.0):
+    """Largest point size whose capitals still fit the printable height.
+    The editor caps its slider with this so a forced size can't silently run
+    off the tape."""
+    h_mm = printable_text_height_mm(fmt, padding_mm)
+    return max(6, int(h_mm / CAP_HEIGHT_EM / 25.4 * 72))
 
 
 def _load_font(size, bold=False, italic=False):
@@ -246,7 +280,7 @@ def _layout(runs, max_width, max_height, font_size_pt=None,
         return lines, line_h, total_h, max_w
 
     if font_size_pt:
-        size = int(font_size_pt)
+        size = pt_to_px(font_size_pt)
         lines, line_h, _, _ = lines_for_size(size)
         return size, lines, line_h
 

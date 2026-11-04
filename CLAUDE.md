@@ -63,6 +63,9 @@ label_render.py     FORMATS (seed dei preset built-in). render() dispatch
                     _layout() = binary search del font massimo che entra;
                     usa _line_visual_geometry come _draw_lines, così le
                     altezze del bin search e del rendering coincidono.
+                    pt_to_px() converte i punti del cursore in pixel PIL;
+                    max_font_pt(fmt, padding_mm) dà il corpo massimo che
+                    sta in un preset (esposto da /api/formats).
                     PPD_IMAGEABLE_MARGINS_MM mappa le imageable areas per
                     media DYMO; centring_offset_mm() restituisce lo shift
                     da applicare in stampa per portare il centro logico
@@ -292,6 +295,26 @@ Limite: 999 (max free Iconify), default frontend 200.
 - Linux (Pi): `DejaVuSans*.ttf` (4 file separati)
 - Mappa `FONT_FACES[(bold, italic)] = (path, index)` in `label_render.py`
   inizializzata in base a `platform.system()`.
+
+### I "pt" del cursore non sono pixel: PIL misura il font in pixel
+`ImageFont.truetype(path, size)` vuole `size` in **pixel**, e il canvas gira a
+300 DPI. Il valore del cursore ci finiva dentro tale e quale, quindi un "20 pt"
+veniva disegnato a 20 px = 1,69 mm di corpo invece di 7,06 mm: 300/72 = 4,17×
+più piccolo di quello che fa una LabelManager 160 con lo stesso numero.
+Verificato col righello su quattro nastri, due per macchina, a 8 e 20.
+
+Fix: `pt_to_px()` in label_render.py, usata nel ramo a dimensione forzata di
+`_layout`. L'auto-fit NON la usa — la sua binary search lavora già in pixel
+(8..400 px) ed è rimasta identica byte per byte (verificato su 33 combinazioni
+preset × opzioni).
+
+Corollario: il cursore non può più arrivare dove gli pare, o il testo uscirebbe
+dal nastro senza dirlo. `max_font_pt(fmt, padding_mm)` calcola il massimo che
+ci sta misurando sull'altezza delle MAIUSCOLE (CAP_HEIGHT_EM = 0.72) e non
+sull'em intero: i discendenti possono sfiorare il padding, come su una
+etichettatrice a mano. /api/formats lo espone per ogni preset (override di
+padding incluso) e `syncFontSizeUI()` ci limita lo slider — nastro 9 mm →
+23 pt, 11354 57×32 → 98 pt.
 
 ### Centering verticale del testo: glyph extents reali, non i metric
 `_layout` (bin search) e `_draw_lines` usano lo stesso helper

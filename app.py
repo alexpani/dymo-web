@@ -31,6 +31,11 @@ def get_formats():
     out = []
     for i, fmt in enumerate(presets_catalog.load()):
         item = {'index': i, **fmt, 'cups_media': resolve_cups_media(fmt)}
+        # Largest forced font size that still fits this preset, padding
+        # override included, so the editor's slider can't ask for text that
+        # runs off the label.
+        item['max_font_pt'] = label_render.max_font_pt(
+            fmt, presets_store.get(fmt['name'])['padding_mm'])
         if fmt.get('kind') == 'tape':
             item['dead_zone_mm'] = round(label_render.TAPE_DEAD_ZONE_MM, 2)
             item['min_length_mm'] = TAPE_LENGTH_MIN_MM
