@@ -100,32 +100,20 @@ DEFAULT_IMAGEABLE_MARGINS_MM = (1.0, 1.5, 1.0, 1.5)  # safe DYMO label default
 TAPE_DEAD_ZONE_MM = 2 * (30 / 72 * 25.4)  # 30 pt leader + 30 pt trailer = 21.17 mm
 TAPE_MIN_PRINTABLE_MM = 10.0              # below this a glyph has nowhere to go
 
-# ── Tape printable band (across the tape) ────────────────────────────────────
-# The D1 printhead is narrower than the tape it runs on. For 9 mm the tape PPD
-# declares '*ImageableArea w26h4000: "2.80 30.00 22.80 3970.00"' on a 25.60 pt
-# page: 7.06 mm of band with ~1 mm the head cannot reach on either side.
-# Same lie as the dead zone - our Custom.WxLmm pages claim no margins at all
-# and the mechanism ignores the claim. Measured on tape: a 20 pt line asked for
-# 5.33 mm of ink and printed 5.21 mm, so the bitmap is cropped at the edges,
-# not scaled down. We keep rendering the PNG at the full tape width (the print
-# pipeline derives the media width from it) and only hold the text inside this
-# band, centred - the crop is symmetric.
-TAPE_PRINTABLE_MM = {
-    'w26h4000':  7.06,   #  9 mm tape: 2.80..22.80 pt
-    'w35h4000':  9.03,   # 12 mm tape: 4.40..30.00 pt
-    'w55h4000': 14.11,   # 19 mm tape: 7.20..47.20 pt
-    'w68h4000': 18.06,   # 24 mm tape: 8.40..59.60 pt
-}
-TAPE_PRINTABLE_FRACTION = 0.75   # custom media fallback: the four widths above
-                                 # land between 73% and 78% of the tape
-
-
-def tape_printable_mm(fmt):
-    """Band the printhead can actually reach across the tape, in mm."""
-    known = TAPE_PRINTABLE_MM.get(resolve_cups_media(fmt) or '')
-    if known:
-        return known
-    return round(float(fmt['width_mm']) * TAPE_PRINTABLE_FRACTION, 2)
+# ── Tape registration slop (across the tape) ─────────────────────────────────
+# The head covers the whole width of the tape. The tape PPD does declare a
+# narrower *ImageableArea for its named media (w26h4000 is "2.80 30.00 22.80
+# 3970.00" on a 25.60 pt page, 7.06 mm of a 9 mm tape) but for the
+# Custom.WxLmm pages we actually print it claims '*HWMargins: 0 0 0 0', and
+# here - unlike along the length, where the same claim hides the dead zone -
+# the claim is true. Measured on a calibration print: the frame drawn at the
+# very edge of the canvas came out 0.33 mm inside the tape's edge.
+#
+# What is not perfect is registration. That same print landed 0.29 mm past the
+# far edge, so the bitmap sits about 0.3 mm off centre across the tape. Half a
+# millimetre at each edge covers it without costing a glyph; a preset that
+# needs more than that has offset_y_mm.
+TAPE_REGISTRATION_MM = 0.5
 
 
 def get_imageable_margins_mm(fmt):
@@ -166,7 +154,7 @@ def printable_height_mm(fmt):
     figure holds for orientation='vertical' too (there the canvas is swapped
     before rendering)."""
     if fmt.get('kind') == 'tape':
-        return tape_printable_mm(fmt)
+        return max(1.0, float(fmt['width_mm']) - 2 * TAPE_REGISTRATION_MM)
     i_w, i_h = imageable_size_mm(fmt)
     return max(1.0, min(i_w, i_h))
 
@@ -413,18 +401,11 @@ def render_calibration(fmt, offset_x_mm=0.0, offset_y_mm=0.0):
     # Frame at the imageable border
     draw.rectangle([(0, 0), (w - 1, h - 1)], outline='black', width=2)
 
-    # Tapes: the head cannot reach the outer ~1 mm, so the frame's long edges
-    # come out missing on paper. Mark the band it does reach - text has to live
-    # between these two lines.
-    if fmt.get('kind') == 'tape':
-        band = mm_to_px(tape_printable_mm(fmt))
-        band_top = (h - band) // 2
-        draw.line([(0, band_top), (w - 1, band_top)], fill='black', width=2)
-        draw.line([(0, band_top + band - 1), (w - 1, band_top + band - 1)],
-                  fill='black', width=2)
-        safe_bottom = band_top + band
-    else:
-        safe_bottom = h
+    # On tape the frame sits at the very edge of the tape, so it doubles as the
+    # registration check: a long edge that comes out missing is the bitmap
+    # running off that side, and how much of it is missing goes into the
+    # preset's offset_y_mm.
+    safe_bottom = h - mm_to_px(TAPE_REGISTRATION_MM) if fmt.get('kind') == 'tape' else h
 
     # Crosshair at canvas centre (= imageable centre, becomes paper centre
     # after auto-compensation in apply_offset).
@@ -646,16 +627,17 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
     length from the PNG, so rendering the printable run is all it takes to get
     length_mm of tape in hand.
 
-    Across the tape the text is held inside tape_printable_mm(), not the full
-    tape width: the printhead cannot reach the outer ~1 mm and would crop it.
-    The PNG still spans the whole tape (the pipeline reads the media width off
-    it) and the band is centred, because the crop is symmetric.
+    Across the tape the text is held inside printable_height_mm(), which keeps
+    TAPE_REGISTRATION_MM at each edge: the head reaches the whole width, but
+    the bitmap lands about 0.3 mm off centre and a glyph flush with the edge
+    would lose that much. The PNG still spans the whole tape (the pipeline
+    reads the media width off it) and the band is centred.
 
     padding_mm is split: ~75% horizontally (along the tape) and 50% vertically
-    (across the narrow printable band — even less air would crowd the glyphs).
+    (across the narrow tape width — even less air would crowd the glyphs).
     """
     height_px = mm_to_px(fmt['width_mm'])         # PNG height = tape width
-    band_px = mm_to_px(tape_printable_mm(fmt))    # what the head can reach
+    band_px = mm_to_px(printable_height_mm(fmt))  # minus registration slop
     min_length_px = mm_to_px(fmt['height_mm'])    # minimum PNG length
     max_length_px = mm_to_px(1400)                # cap (CUPS w*h4000 ~= 1411 mm)
 

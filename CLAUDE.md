@@ -64,10 +64,10 @@ label_render.py     FORMATS (seed dei preset built-in). render() dispatch
                     usa _line_visual_geometry come _draw_lines, così le
                     altezze del bin search e del rendering coincidono.
                     pt_to_px() converte i punti del cursore in pixel PIL;
-                    tape_printable_mm() dà la banda che la testina
-                    raggiunge davvero su un nastro e printable_height_mm()
-                    la generalizza alle fustellate; max_font_pt() ne ricava
-                    il corpo massimo (esposto da /api/formats).
+                    printable_height_mm() dà l'altezza su cui si può
+                    scrivere (nastro meno il registro, o lato corto
+                    dell'imageable area); max_font_pt() ne ricava il corpo
+                    massimo (esposto da /api/formats).
                     PPD_IMAGEABLE_MARGINS_MM mappa le imageable areas per
                     media DYMO; centring_offset_mm() restituisce lo shift
                     da applicare in stampa per portare il centro logico
@@ -316,7 +316,7 @@ dall'area stampabile senza dirlo. `max_font_pt(fmt)` calcola il massimo sul
 delle maiuscole: così non è una `g` a farsi tagliare. Il padding NON viene
 sottratto — è una preferenza di layout, e un blocco troppo alto ci sborda
 dentro, mentre l'area stampabile è fisica. /api/formats lo espone per ogni
-preset e `syncFontSizeUI()` ci limita lo slider: nastro 9 mm → 20 pt,
+preset e `syncFontSizeUI()` ci limita lo slider: nastro 9 mm → 23 pt,
 11354 57×32 → 85 pt.
 
 Verificato preset per preset: al massimo il testo con discendenti sta dentro,
@@ -328,40 +328,35 @@ A 8 pt, dove nessuna delle due è al limite, le due macchine coincidono entro
 il 5% — ed è il DejaVu della LXC che disegna le maiuscole l'1,8% più alte di
 Arial, più l'allargamento dell'inchiostro termico.
 
-### La testina non arriva ai bordi del nastro: ~1 mm per lato è cieco
-Fratello della zona morta: lì il nastro bianco sta a monte e a valle della
-stampa, qui sta ai **lati lunghi**. La PPD lo dichiara per i media a nome —
-`*ImageableArea w26h4000: "2.80 30.00 22.80 3970.00"` su una pagina da
-25.60 pt — cioè su un nastro da 9 mm la testina copre **7,06 mm**, con
-0,97 mm irraggiungibili per lato. E come per la zona morta, sui `Custom.WxLmm`
-che stampiamo davvero la PPD dichiara margini nulli e il meccanismo se ne
-infischia.
+### Sui media custom la testina copre tutto il nastro (ma il registro balla)
+La PPD del nastro dichiara una ImageableArea più stretta per i media **a
+nome** — `*ImageableArea w26h4000: "2.80 30.00 22.80 3970.00"` su una pagina
+da 25.60 pt, cioè 7,06 mm su un nastro da 9 — e per i `Custom.WxLmm` dichiara
+`*HWMargins: 0 0 0 0`. Lungo la **lunghezza** quella dichiarazione è falsa, ed
+è la zona morta. Attraverso la **larghezza** è vera: stampato il pattern di
+calibrazione, la cornice disegnata sul bordo esatto della tela è uscita a
+0,33 mm dal bordo del nastro. Non generalizzare la bugia da un asse all'altro:
+l'ho fatto, e il commit che ne è uscito restringeva il testo a 7,06 mm per
+niente (060c177, corretto subito dopo).
 
-Non riscala, **taglia**: a 20 pt il PNG conteneva 5,33 mm di inchiostro e sul
-nastro ne sono usciti 5,21 (se riscalasse sarebbero stati 5,33 × 7,06/9 =
-4,16). Quindi il PNG continua a essere alto quanto tutto il nastro — la
-pipeline ne ricava la larghezza del media, non si tocca — e solo il **testo**
-viene tenuto dentro `tape_printable_mm(fmt)`, centrato, visto che il taglio
-è simmetrico.
+Quello che balla è il **registro**: la stessa stampa è finita 0,29 mm oltre il
+bordo opposto, cioè il bitmap sta ~0,3 mm fuori centro attraverso il nastro.
+`TAPE_REGISTRATION_MM = 0.5` tiene mezzo millimetro per lato, che lo assorbe;
+un preset che ha bisogno di più ha `offset_y_mm` (19 e 24 mm stanno a −2,5
+e −3).
 
-Valori (banda / nastro): 9 → 7,06 mm, 12 → 9,03, 19 → 14,11, 24 → 18,06.
-Per media custom il fallback è il 75% della larghezza, che è dove cadono
-tutti e quattro (73–78%).
+Per misurarlo: stampa la calibrazione del preset nastro. La cornice sta sul
+bordo esatto della tela, quindi un lato lungo che esce monco è il bitmap che
+scappa da quella parte, e quanto manca va in `offset_y_mm`. Se misuri da una
+foto, usa come scala **il righello del pattern stesso** (tacche lunghe ogni
+5 mm), non la larghezza del nastro a occhio: sulla stessa foto le due scale
+davano 20,0 contro 23 px/mm.
 
-Due conseguenze:
-- `_draw_lines` ora sborda **simmetrico** quando il blocco è più alto della
-  sua scatola (prima `max(0, ...)` lo faceva colare tutto in basso). Sul
-  nastro i bordi non sono vuoti, sono ciechi: spartire lo sbordo in due costa
-  metà da ogni lato. È anche ciò che rende stampabile un 20 pt sul 9 mm.
-- il pattern di calibrazione disegna due righe in più che marcano la banda.
-  Sulla carta la cornice esterna esce monca sui lati lunghi: è previsto, il
-  testo deve stare fra le due righe interne.
-
-Se un preset nastro ha un `auto_fit_safety` alto, quasi certamente è un
-rattoppo a mano di questo bug e ora va azzerato: sul 9 mm l'auto-fit senza
-safety produceva 8,13 mm di inchiostro su 7,06 di banda (tagliato), col 45%
-di safety 4,40 mm (troppo piccolo); ora la banda è nota e senza safety
-l'auto-fit si ferma a 6,18 mm, che è quanto ci sta.
+Resta valido dal tentativo sbagliato, e vale la pena tenerlo:
+- `max_font_pt()` misura su `LINE_INK_EM = 0.96` (maiuscola + discendente) e
+  sulla sola area stampabile, padding escluso.
+- `_draw_lines` sborda **simmetrico** quando il blocco non ci sta: prima
+  `max(0, ...)` lo faceva colare tutto in basso, cioè tutto da un lato solo.
 
 ### Centering verticale del testo: glyph extents reali, non i metric
 `_layout` (bin search) e `_draw_lines` usano lo stesso helper
