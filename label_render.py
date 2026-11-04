@@ -60,6 +60,11 @@ def mm_to_px(mm):
     return int((mm / 25.4) * DPI)
 
 
+def px_to_pt(px):
+    """Inverse of pt_to_px, rounded to the whole point the slider works in."""
+    return max(1, int(round(px / DPI * 72)))
+
+
 def pt_to_px(pt):
     """Typographic points to pixels on the 300 DPI canvas. PIL sizes fonts in
     pixels, so handing it points straight rendered them 300/72 = 4.17x too
@@ -316,7 +321,7 @@ def render(fmt, runs=None,
            decor='none', qr_content='', icon_id='', decor_position='left',
            align='center', font_size_pt=None,
            auto_fit_safety=0.0, padding_mm=2.0, line_spacing=0.2,
-           offset_x_mm=0.0, offset_y_mm=0.0, length_mm=None,
+           offset_x_mm=0.0, offset_y_mm=0.0, length_mm=None, report=None,
            text='', bold=False, italic=False, orientation='horizontal',
            # legacy aliases (older clients / curl scripts):
            qr_enabled=False, qr_position=None):
@@ -337,6 +342,9 @@ def render(fmt, runs=None,
                      measured with a ruler. TAPE_DEAD_ZONE_MM of that is blank
                      leader+trailer the mechanism adds; the text shrinks (and
                      wraps) to fit what's left. None = auto-fit to content.
+    report:          optional dict; render() fills in 'font_size_pt' with the
+                     size actually used, so a caller running in auto-fit can
+                     show what the binary search picked
     orientation:     'horizontal' (default) or 'vertical' — when vertical the
                      content is laid out on a swapped canvas (height × width)
                      and rotated 90° before output, so the printed paper
@@ -355,7 +363,8 @@ def render(fmt, runs=None,
 
     if fmt.get('kind') == 'tape':
         img = _render_tape(fmt, runs, align, font_size_pt,
-                           auto_fit_safety, padding_mm, line_spacing, length_mm)
+                           auto_fit_safety, padding_mm, line_spacing, length_mm,
+                           report)
     else:
         # Render at the imageable size (paper minus PPD hardware margins),
         # so the print pipeline can ship the PNG as-is — no fit-to-page,
@@ -366,7 +375,8 @@ def render(fmt, runs=None,
             i_w, i_h = i_h, i_w
         fmt_eff = {**fmt, 'width_mm': i_w, 'height_mm': i_h}
         img = _render_label(fmt_eff, runs, decor, qr_content, icon_id, decor_position,
-                            align, font_size_pt, auto_fit_safety, padding_mm, line_spacing)
+                            align, font_size_pt, auto_fit_safety, padding_mm,
+                            line_spacing, report)
 
     if is_vertical:
         img = img.rotate(-90, expand=True)
@@ -542,7 +552,7 @@ def _build_decor(decor, qr_content, icon_id, size_px):
 
 def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
                   font_size_pt, auto_fit_safety=0.0, padding_mm=2.0,
-                  line_spacing=0.2):
+                  line_spacing=0.2, report=None):
     width_px = mm_to_px(fmt['width_mm'])
     height_px = mm_to_px(fmt['height_mm'])
     pad = mm_to_px(padding_mm)
@@ -606,13 +616,15 @@ def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
     if has_text and text_w > 10 and text_h > 10:
         size, lines, line_h = _layout(runs, text_w, text_h, font_size_pt,
                                       auto_fit_safety, line_spacing)
+        if report is not None:
+            report['font_size_pt'] = px_to_pt(size)
         _draw_lines(draw, lines, _font_cache(size), text_x, text_y, text_w, text_h,
                     line_h, align, line_spacing)
     return img
 
 
 def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
-                 padding_mm=2.0, line_spacing=0.2, length_mm=None):
+                 padding_mm=2.0, line_spacing=0.2, length_mm=None, report=None):
     """
     Tape: width fixed (= tape width), length either auto-fit to the content
     (length_mm=None) or pinned so the cut label measures length_mm.
@@ -670,6 +682,9 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
             default=0,
         )
         width_px = max(min_length_px, int(widest) + 2 * pad_long)
+
+    if report is not None:
+        report['font_size_pt'] = px_to_pt(size)
 
     img = Image.new('RGB', (width_px, height_px), 'white')
     draw = ImageDraw.Draw(img)

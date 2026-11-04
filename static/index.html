@@ -605,7 +605,10 @@ async function loadFormats() {
   syncFormatLimits();
 }
 
-const state = { align: 'center', orientation: 'horizontal', decor: 'none', icon_id: '' };
+// autoFont: the slider is parked on whatever the auto-fit picked, but we keep
+// sending null so the text goes on refitting as it's edited. Moving the slider
+// off that value is how you take over, starting from the size auto chose.
+const state = { align: 'center', orientation: 'horizontal', decor: 'none', icon_id: '', autoFont: true };
 let iconSearchTimer = null;
 
 function extractRuns(root) {
@@ -698,7 +701,7 @@ function getPayload() {
     decor_position: $('decor_position').value,
     align: state.align,
     orientation: state.orientation,
-    font_size_pt: sliderVal > 0 ? sliderVal : null,
+    font_size_pt: state.autoFont ? null : (sliderVal > 0 ? sliderVal : null),
     line_spacing: parseInt($('line_spacing').value, 10) / 100,
     length_mm: tapeLengthValue(),
   };
@@ -733,6 +736,13 @@ async function updatePreview() {
       console.error('Preview error', res.status);
       return;
     }
+    // In auto-fit the server reports the size it settled on; park the slider
+    // there so you can see it and take over from it.
+    if (state.autoFont) {
+      const chosen = parseInt(res.headers.get('X-Font-Size-Pt') || '0', 10);
+      $('font_size').value = chosen > 0 ? chosen : 0;
+      syncFontSizeUI();
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const img = $('preview');
@@ -763,7 +773,7 @@ function saveDraftLocal() {
       decor_position: $('decor_position').value,
       align:          state.align,
       orientation:    state.orientation,
-      font_size_pt:   parseInt($('font_size').value, 10),
+      font_size_pt:   state.autoFont ? 0 : parseInt($('font_size').value, 10),
       line_spacing:   parseInt($('line_spacing').value, 10),
       length_mm:      tapeLengthValue(),
     };
@@ -800,6 +810,7 @@ function loadDraftLocal() {
     state.orientation = d.orientation || 'horizontal';
     $('orientation_group').querySelectorAll('.seg').forEach(b =>
       b.classList.toggle('active', b.dataset.orient === state.orientation));
+    state.autoFont = !d.font_size_pt;
     $('font_size').value = d.font_size_pt || 0;
     syncFontSizeUI();
     const ls = (d.line_spacing != null ? d.line_spacing : 20);
@@ -823,6 +834,7 @@ function resetEditor() {
   state.orientation = 'horizontal';
   $('orientation_group').querySelectorAll('.seg').forEach(b =>
     b.classList.toggle('active', b.dataset.orient === 'horizontal'));
+  state.autoFont = true;
   $('font_size').value = 0;
   syncFontSizeUI();
   $('line_spacing').value = 20;
@@ -1034,16 +1046,21 @@ function syncFontSizeUI() {
   const max = (fmt && fmt.max_font_pt) || 48;
   $('font_size').max = max;
   if (parseInt($('font_size').value, 10) > max) $('font_size').value = max;
-  $('font_size').title = `0 = automatico. Massimo ${max} pt su questo formato.`;
+  $('font_size').title = `Auto adatta il corpo e porta il cursore sulla misura 
+    scelta; trascinalo per fissarla, 0 torna ad Auto. Massimo ${max} pt su questo formato.`;
   const v = parseInt($('font_size').value, 10);
-  $('font_size_label').textContent = v > 0 ? v + ' pt' : 'Auto';
-  $('font_size_reset').disabled = v === 0;
+  $('font_size_label').textContent = state.autoFont
+    ? (v > 0 ? 'Auto · ' + v + ' pt' : 'Auto')
+    : v + ' pt';
+  $('font_size_reset').disabled = state.autoFont;
 }
 $('font_size').addEventListener('input', () => {
+  state.autoFont = parseInt($('font_size').value, 10) === 0;
   syncFontSizeUI();
   schedulePreview();
 });
 $('font_size_reset').addEventListener('click', () => {
+  state.autoFont = true;
   $('font_size').value = 0;
   syncFontSizeUI();
   schedulePreview();
@@ -1092,6 +1109,7 @@ function applyPayload(payload) {
   $('align_group').querySelectorAll('.seg').forEach(b =>
     b.classList.toggle('active', b.dataset.align === state.align));
   const sz = payload.font_size_pt || 0;
+  state.autoFont = !sz;
   $('font_size').value = sz;
   syncFontSizeUI();
   const ls = (payload.line_spacing != null ? Math.round(payload.line_spacing * 100) : 20);

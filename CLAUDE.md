@@ -48,7 +48,8 @@ app.py              Flask routes + waitress runner.
                     parsing del payload e applica gli override del preset
                     corrente leggendoli da presets_store.
                     for_print=True applica anche l'offset meccanico;
-                    /api/preview usa False, /api/print usa True.
+                    /api/preview usa False, /api/print usa True, e torna
+                    in X-Font-Size-Pt il corpo che il render ha usato.
                     _tape_length_mm() valida/clampa la lunghezza nastro
                     richiesta; /api/formats espone dead_zone_mm e i
                     min/max ai preset tape, così il frontend non
@@ -63,7 +64,9 @@ label_render.py     FORMATS (seed dei preset built-in). render() dispatch
                     _layout() = binary search del font massimo che entra;
                     usa _line_visual_geometry come _draw_lines, così le
                     altezze del bin search e del rendering coincidono.
-                    pt_to_px() converte i punti del cursore in pixel PIL;
+                    pt_to_px() converte i punti del cursore in pixel PIL
+                    e px_to_pt() torna indietro; render(report={}) riempie
+                    il dict col corpo usato, per l'editor in auto-fit;
                     printable_height_mm() dà l'altezza su cui si può
                     scrivere (nastro meno il registro, o lato corto
                     dell'imageable area); max_font_pt() ne ricava il corpo
@@ -357,6 +360,27 @@ Resta valido dal tentativo sbagliato, e vale la pena tenerlo:
   sulla sola area stampabile, padding escluso.
 - `_draw_lines` sborda **simmetrico** quando il blocco non ci sta: prima
   `max(0, ...)` lo faceva colare tutto in basso, cioè tutto da un lato solo.
+
+### Il cursore in Auto è un display, non un valore
+Richiesta dell'utente: in auto-fit il cursore deve mostrare la misura scelta.
+Il tranello è che spostarci il cursore e basta spegnerebbe l'auto-fit al
+primo carattere digitato. Quindi `state.autoFont` separa le due cose: il
+cursore sta sulla misura che il server ha scelto, ma `getPayload()` continua
+a mandare `font_size_pt: null` finché quel flag è vero. Si prende il comando
+muovendo il cursore (parte da lì, non da zero), si torna in Auto col tasto o
+portandolo a 0. L'etichetta dice "Auto · 23 pt" contro "23 pt".
+
+Il valore arriva dall'header `X-Font-Size-Pt` di `/api/preview`: il body è un
+PNG, quindi non c'era un JSON dove metterlo. `render(report={})` riempie il
+dict in `_render_label` / `_render_tape` subito dopo `_layout` — niente
+secondo giro di layout, e nessun duplicato della geometria della scatola di
+testo, che nei due rami è diversa.
+
+Due dettagli: il flag si rilegge **dopo** l'await della fetch, così
+un'anteprima già in volo non sovrascrive un cursore che l'utente ha appena
+mosso; e il draft in localStorage salva 0, non la misura parcheggiata, o al
+reload l'auto-fit si ritroverebbe spento. L'andata e ritorno auto → pt →
+forzato costa al massimo 0,17 mm di arrotondamento al punto intero.
 
 ### Centering verticale del testo: glyph extents reali, non i metric
 `_layout` (bin search) e `_draw_lines` usano lo stesso helper

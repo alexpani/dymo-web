@@ -34,8 +34,13 @@ Repo: [github.com/alexpani/dymo-web](https://github.com/alexpani/dymo-web)
   coda, per via della distanza tra testina e taglierina — e sotto quella
   soglia non resterebbe spazio stampabile. L'anteprima mostra solo la parte
   stampabile; la riga sotto di essa scrive entrambi i numeri.
-- **Slider Dim. font**: auto-fit di default; sposta lo slider per forzare
-  un valore, click "Auto" per tornare al fit automatico.
+- **Slider Dim. font**: auto-fit di default. Dopo ogni anteprima il cursore
+  si porta sulla misura che l'auto-fit ha scelto e l'etichetta legge
+  "Auto · N pt": il testo continua ad adattarsi mentre scrivi, ma vedi a
+  quanti punti sei. Sposta il cursore per fissare quella misura (parti da
+  lì, non da zero); 0 o il tasto "Auto" tornano al fit automatico. Il
+  massimo dipende dal formato: è il corpo più grande che la stampante
+  riesce ancora a stampare per intero, discendenti comprese.
 - **Slider Interlinea** 0–100% (default 20%).
 - **Reset** azzera l'editor; **Salva bozza** mette l'etichetta in cronologia
   senza stamparla.

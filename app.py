@@ -112,13 +112,18 @@ def _render_kwargs(data, for_print=False):
 
 @app.route('/api/preview', methods=['POST'])
 def preview():
-    """Generate and return a preview PNG."""
+    """Generate and return a preview PNG. X-Font-Size-Pt carries the size the
+    render actually used, so an editor sitting in auto-fit can show it."""
     try:
-        img = render(**_render_kwargs(request.get_json(), for_print=False))
+        report = {}
+        img = render(report=report, **_render_kwargs(request.get_json(), for_print=False))
         buf = io.BytesIO()
         img.save(buf, format='PNG')
         buf.seek(0)
-        return buf.getvalue(), 200, {'Content-Type': 'image/png'}
+        headers = {'Content-Type': 'image/png'}
+        if report.get('font_size_pt'):
+            headers['X-Font-Size-Pt'] = str(report['font_size_pt'])
+        return buf.getvalue(), 200, headers
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
