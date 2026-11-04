@@ -352,10 +352,26 @@ e −3).
 
 Per misurarlo: stampa la calibrazione del preset nastro. La cornice sta sul
 bordo esatto della tela, quindi un lato lungo che esce monco è il bitmap che
-scappa da quella parte, e quanto manca va in `offset_y_mm`. Se misuri da una
-foto, usa come scala **il righello del pattern stesso** (tacche lunghe ogni
-5 mm), non la larghezza del nastro a occhio: sulla stessa foto le due scale
-davano 20,0 contro 23 px/mm.
+scappa da quella parte, e quanto manca va in `offset_y_mm`.
+
+Il metodo di misura buono, su foto, non tocca mai il bordo del nastro — che è
+bianco su bianco e si stima male. Due riferimenti stanno già dentro la stampa:
+le **due verticali della cornice distano 60 mm esatti** (danno la scala in
+px/mm) e la **crocetta sta al centro esatto della tela** (dà come si spartisce
+la perdita fra i due lati). Da lì: quanto è alto l'inchiostro stampato contro
+l'altezza della tela = quanto si è perso; distanza crocetta-inchiostro sopra
+contro sotto = da che parte. Misurato così su due cassette:
+
+| nastro | tela | stampato | perso | sopra | sotto |
+|--------|------|----------|-------|-------|-------|
+|  9 mm  | 9,00 |   8,84   | 0,16  | 0,29  | ~0    |
+| 12 mm  | 12,00|  11,54   | 0,46  | 0,30  | 0,16  |
+
+Circa **0,3 mm in alto su entrambe**, cioè uno scarto di registro costante e
+non proporzionale alla larghezza: è la stampante, non la cassetta. Il mezzo
+millimetro di `TAPE_REGISTRATION_MM` lo copre su tutt'e due, e il 12 mm non ha
+bisogno di nessun `offset_y_mm`. Conferma anche, con un metodo che non dipende
+da stime a occhio, che la testina copre tutta la larghezza.
 
 Resta valido dal tentativo sbagliato, e vale la pena tenerlo:
 - `max_font_pt()` misura su `LINE_INK_EM = 0.96` (maiuscola + discendente) e

@@ -427,7 +427,11 @@ def render_calibration(fmt, offset_x_mm=0.0, offset_y_mm=0.0):
     # registration check: a long edge that comes out missing is the bitmap
     # running off that side, and how much of it is missing goes into the
     # preset's offset_y_mm.
-    safe_bottom = h - mm_to_px(TAPE_REGISTRATION_MM) if fmt.get('kind') == 'tape' else h
+    # The caption has to clear the bottom ruler as well, or it prints on top of
+    # the ticks - which is exactly what 12 mm tape did, its caption landing
+    # across them. Narrow tape simply has no room for it.
+    safe_bottom = (h - mm_to_px(max(TAPE_REGISTRATION_MM, 2.0))
+                   if fmt.get('kind') == 'tape' else h)
 
     # Crosshair at canvas centre (= imageable centre, becomes paper centre
     # after auto-compensation in apply_offset).
