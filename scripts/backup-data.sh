@@ -1,5 +1,6 @@
 #!/bin/bash
-# Nightly backup: copies preset_overrides.json + history.json into the repo's
+# Nightly backup: copies the live JSON state (presets catalog, per-preset
+# overrides, print history) into the repo's
 # data/ directory and pushes to the 'github' remote (read-only-friendly path
 # -> survives a full SD wipe).
 #
@@ -14,6 +15,9 @@ DEST=$REPO/data
 cd "$REPO"
 
 mkdir -p "$DEST"
+# presets.json only exists once the catalog has been edited from /presets;
+# until then the built-in seed in label_render.FORMATS is the source of truth.
+[ -f "$SRC/presets.json" ]          && cp "$SRC/presets.json"          "$DEST/presets.json"
 [ -f "$SRC/preset_overrides.json" ] && cp "$SRC/preset_overrides.json" "$DEST/preset_overrides.json"
 [ -f "$SRC/history.json" ]          && cp "$SRC/history.json"          "$DEST/history.json"
 
