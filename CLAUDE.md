@@ -398,6 +398,21 @@ vero funziona benissimo, in foto bisogna avere il nastro piatto, ben
 illuminato e su uno sfondo che contrasti — oppure chiedere a chi ce l'ha in
 mano.
 
+Verificate tutte e quattro le larghezze con la calibrazione, crocetta contro
+bordi del nastro:
+
+| nastro | offset_y_mm | centrato |
+|--------|-------------|----------|
+|  9 mm  |  0          | sì       |
+| 12 mm  |  0          | sì       |
+| 19 mm  | −2,5        | sì       |
+| 24 mm  | −3          | sì       |
+
+Le strette non hanno bisogno di niente (la cornice arriva quasi a filo di
+entrambi i bordi), le larghe di 2,5–3 mm verso l'alto. Il salto fra 12 e 19 è
+netto e non proporzionale alla larghezza, quindi non provare a sostituire
+questi quattro numeri con una formula: sono quattro cassette, non una curva.
+
 Resta valido dal tentativo sbagliato, e vale la pena tenerlo:
 - `max_font_pt()` misura su `LINE_INK_EM = 0.96` (maiuscola + discendente) e
   sulla sola area stampabile, padding escluso.
