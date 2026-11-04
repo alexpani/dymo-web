@@ -373,20 +373,30 @@ millimetro di `TAPE_REGISTRATION_MM` lo copre su tutt'e due, e il 12 mm non ha
 bisogno di nessun `offset_y_mm`. Conferma anche, con un metodo che non dipende
 da stime a occhio, che la testina copre tutta la larghezza.
 
-Poi il 24 mm, che aveva `offset_y_mm: -3`. Lì la prova non è passata nemmeno
-dalla foto: basta rigenerare il PNG che è stato spedito. Conteneva già la
-cornice superiore tagliata via e 2,96 mm di bianco in fondo — quelli li
-facevamo noi con l'offset — e il nastro stampato lo riproduce con i soliti
-~0,3 mm di scarto. Quando sospetti un offset, **guarda prima il PNG che esce
-da `render_calibration`**: separa quello che fa il nostro codice da quello che
-fa il meccanismo, senza righello.
+### Misurare la stampa su sé stessa non dice dove sta sul nastro
+Errore mio, da non rifare. Sul 24 mm, che ha `offset_y_mm: -3`, avevo concluso
+che quell'offset fosse inutile: avevo misurato l'inchiostro stampato contro le
+**verticali della cornice** e contro il PNG spedito, trovandoli coerenti entro
+0,3 mm, e ne avevo dedotto "la stampante riproduce fedelmente, quindi l'offset
+sposta fuori centro una stampa già centrata". L'utente ha guardato il nastro e
+ha detto il contrario: con −3 era centrato, azzerandolo è finito in basso.
 
-Esito: azzerati gli `offset_y_mm` di tutti i nastri (il 19 per deduzione, non
-avendo quella cassetta: tre larghezze su tre danno lo stesso scarto costante).
-Nessun preset nastro ha più bisogno di compensazioni — erano tutte rattoppi a
-mano del bug punti/pixel e dei margini fraintesi. **Se un giorno ricompare un
-offset grande su un nastro, il sospetto giusto è un errore nel modello, non un
-difetto della stampante.**
+Il ragionamento era sbagliato alla radice. Misurare la stampa contro i propri
+riferimenti interni dimostra solo che **non c'è scalatura né ritaglio**: dice
+che il bitmap è riprodotto fedele, non *dove* finisce sul nastro. La posizione
+si giudica solo contro i **bordi del nastro** — che è la misura che avevo
+scartato perché bianco-su-bianco in foto si stima male. Scartata la misura
+difficile, avevo risposto a una domanda più facile facendo finta che fosse la
+stessa.
+
+Quindi: i 2,96 mm di bianco che il PNG ha in fondo **servono**, perché il
+meccanismo del 24 mm spinge il contenuto verso il basso di quei 3 mm. Gli
+offset di 19 e 24 mm sono tarature vere e vanno lasciate stare.
+
+Per giudicare il centraggio servono i bordi del nastro: a occhio sul nastro
+vero funziona benissimo, in foto bisogna avere il nastro piatto, ben
+illuminato e su uno sfondo che contrasti — oppure chiedere a chi ce l'ha in
+mano.
 
 Resta valido dal tentativo sbagliato, e vale la pena tenerlo:
 - `max_font_pt()` misura su `LINE_INK_EM = 0.96` (maiuscola + discendente) e
