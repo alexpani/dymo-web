@@ -10,8 +10,15 @@ Web app personale per stampare etichette su una **DYMO LabelWriter Duo** (USB).
 **Architettura distribuita** in produzione:
 - **LXC Debian su Proxmox** (`dymo.local`, IP 192.168.68.159) — l'app
   Flask completa: render, history, presets, frontend, Iconify.
-- **Raspberry Pi 4** (`dymopi.local`, IP 192.168.68.141) — thin USB
+- **Raspberry Pi 4** (`dymopi.local`, IP 192.168.100.112) — thin USB
   gateway: solo `gateway.py` su porta 5051. La DYMO è collegata qui.
+
+Le due macchine stanno su **subnet diverse**: la LXC sulla rete principale
+(192.168.68.0/24), il Pi sulla VLAN IoT (192.168.100.0/24, gateway
+192.168.100.1). Il router instrada tra le due in entrambe le direzioni, e
+la porta 5051 passa. L'IP del Pi è fissato da una DHCP reservation sul
+router per il MAC di `wlan0` (`E4:5F:01:B3:17:FC` — attenzione, `eth0` è
+`...FB`, differiscono per l'ultima cifra).
 
 LXC → POST PNG/media/kind → Pi gateway → CUPS filter chain → /dev/usb/lpN.
 Pipeline ~150 ms.
@@ -318,6 +325,79 @@ ai successivi, `wlan0` resta DOWN, `/etc/NetworkManager/system-
 connections/` non riceve mai il profilo. Workaround in
 `setup-pi-gateway.sh`: legge SSID + PSK dal seed e crea direttamente
 un profilo NM persistente. Niente fix di cloud-init — bypass.
+
+### Cambiare la WiFi del Pi = `nmcli`, non il seed
+Corollario del punto sopra: dato che cloud-init non propaga mai
+`/boot/firmware/network-config`, quel file è **inerte** e modificarlo non
+cambia la rete. La WiFi vive solo nei profili NetworkManager. Per cambiarla:
+
+```bash
+ssh -t alexpani@dymopi.local 'sudo nmcli device wifi rescan && sleep 5 && \
+  sudo nmcli device wifi connect "SSID" password "PSK"'
+```
+
+Il seed va comunque tenuto in pari con le credenziali vere: non serve al
+boot, ma `setup-pi-gateway.sh` lo legge e su un Pi riflashato ricreerebbe
+il profilo della rete vecchia.
+
+Tre trappole, tutte incontrate davvero:
+- `ssh` senza `-t` fallisce con "a terminal is required to read the
+  password": `sudo` non ha TTY. Il sudoers del Pi ha NOPASSWD **solo** per
+  `systemctl restart dymo-gateway` (lo mette `setup-pi-autodeploy.sh`).
+- `Connection to dymopi.local closed.` è la riga che `ssh -t` stampa a ogni
+  uscita normale. Non è un errore e non significa che il comando è
+  fallito — verifica con `nmcli connection show`, non con quella riga.
+- Se il Pi non ha ethernet attaccata la WiFi è l'unica via d'accesso.
+  Aggiungi il profilo con `connection.autoconnect no`, attivalo a mano,
+  verifica, e solo dopo metti `autoconnect yes`: se qualcosa va storto un
+  power-cycle riporta il Pi sul profilo precedente. Con il cavo attaccato,
+  invece, `dymopi.local` risolve a **entrambi** gli IP e un test positivo
+  può passare dall'ethernet: per un test onesto usa l'IP di `wlan0`, o
+  stacca il cavo.
+
+### La cache di scansione NM fa sembrare inesistente una rete che c'è
+`nmcli device wifi list` restituisce la **lista in cache**, e mentre è già
+connesso il `brcmfmac` del Pi non rifà scansioni aggressive. Sintomo:
+`Error: No network with SSID 'X' found.` per una rete perfettamente
+visibile a ogni altro dispositivo nella stessa stanza. Sempre rescansionare
+prima di concludere che una rete non c'è:
+
+```bash
+sudo nmcli device wifi rescan && sleep 6 && nmcli -f SSID,CHAN,SIGNAL device wifi list
+```
+
+Nota: la rescan richiede sudo (senza, polkit risponde `not authorized`) ma
+la `list` no — quindi una `list` non privilegiata "funziona" restituendo
+dati vecchi, che è il modo peggiore di fallire. Il regdomain del Pi è
+correttamente `IT` (`cat /sys/module/cfg80211/parameters/ieee80211_regdom`),
+quindi i canali 12–13 non sono la spiegazione. `iw` e `rfkill` **non** sono
+installati: per diagnosi WiFi serie, `sudo apt install iw` prima.
+
+### `dymopi.local` sulla LXC lo risolve `/etc/hosts`, non mDNS
+Il `nsswitch.conf` della LXC è `hosts: files mdns4_minimal
+[NOTFOUND=return] dns`, e in `/etc/hosts` c'è una riga statica:
+
+```
+192.168.100.112 dymopi.local dymopi
+```
+
+`files` viene prima, quindi quella riga vince su tutto. **Se l'IP del Pi
+cambia va aggiornata a mano**, altrimenti il `DYMO_GATEWAY_URL` della LXC
+(`http://dymopi.local:5051`) punta nel vuoto e `/api/printers` torna `[]`
+con la stampa silenziosamente morta. Nessun restart del servizio: glibc
+rilegge `/etc/hosts` a ogni risoluzione.
+
+Non tentare di risolverlo con un record sul DNS locale (192.168.68.53, che
+è il resolver servito anche alla VLAN IoT): `[NOTFOUND=return]` dopo
+`mdns4_minimal` interrompe la catena, quindi una query per un nome `.local`
+non arriva **mai** al DNS server.
+
+L'mDNS invece attraversa le due subnet (il router fa reflection: verificato
+dal Mac, che risolve `dymopi.local` → 192.168.100.112), ma sulla LXC non
+entra mai in gioco perché `files` viene prima di `mdns4_minimal`. Se un
+giorno volessi togliere la riga statica, prima verifica che avahi sulla LXC
+risolva davvero il nome — `avahi-utils` non è installato lì e la cosa non è
+testata.
 
 ### cloud-init di Pi Imager riapplica `hostname` ad ogni boot
 `hostnamectl set-hostname dymopi` non sopravvive al reboot: cloud-init
