@@ -106,7 +106,9 @@ presets_store.py    JSON store ~/.config/dymo-web/preset_overrides.json
                     'name': offset_x/y_mm, auto_fit_safety, padding_mm.
                     DEFAULTS definiscono i valori usati senza override.
                     rename(old, new) migra la chiave quando l'utente
-                    rinomina un preset dal catalogo.
+                    rinomina un preset dal catalogo. Il padding NON sta
+                    più qui: è un cursore dell'editor, memorizzato per
+                    formato in localStorage.
 
 history.py          Print history ring buffer
                     ~/.config/dymo-web/history.json. Cap HISTORY_MAX=200,
@@ -381,6 +383,31 @@ un'anteprima già in volo non sovrascrive un cursore che l'utente ha appena
 mosso; e il draft in localStorage salva 0, non la misura parcheggiata, o al
 reload l'auto-fit si ritroverebbe spento. L'andata e ritorno auto → pt →
 forzato costa al massimo 0,17 mm di arrotondamento al punto intero.
+
+### Il padding è una scelta di composizione, non una taratura
+Stava fra gli override di preset accanto a `offset_x/y_mm`, ma quei due
+compensano un disallineamento meccanico della stampante — appartengono al
+pezzo di hardware — mentre il padding è come l'allineamento o l'interlinea:
+cambia da stampa a stampa. Ora il cursore "Margine" sta nell'editor, il
+payload porta `padding_mm` e `_render_kwargs` lo prende da lì, con
+`label_render.DEFAULT_PADDING_MM` come fallback per i client vecchi e i
+curl. Gli offset restano invece server-authoritative: un client non deve
+poterci dissuadere.
+
+Perché non un default globale e basta: su un nastro da 9 mm il valore giusto
+è 0 e sulla 57×32 è 2, quindi un unico default costringerebbe a riazzerarlo a
+ogni cambio formato. L'editor ricorda **l'ultimo margine per nome di preset**
+in `localStorage['dymo-web:padding']`. Il nome, non l'indice, che cambia se
+riordini il catalogo.
+
+`max_padding_mm(fmt)` limita la corsa del cursore a un terzo dell'altezza
+stampabile (9 mm → 2,5; 57×32 → 9,5): oltre, l'aria è più del testo e i tre
+quarti della corsa sarebbero inutili.
+
+Una chiave `padding_mm` rimasta in un `preset_overrides.json` vecchio è
+inerte — `presets_store.get()` filtra su `DEFAULTS` — ma resta scritta nel
+file finché quel preset non viene risalvato. Non è un problema, è solo
+rumore: non rimetterla in DEFAULTS pensando che serva.
 
 ### Centering verticale del testo: glyph extents reali, non i metric
 `_layout` (bin search) e `_draw_lines` usano lo stesso helper

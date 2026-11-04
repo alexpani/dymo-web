@@ -9,7 +9,10 @@ hard-coded in label_render):
     offset_y_mm     float, -5..5    vertical print offset
     auto_fit_safety float, 0..0.5   fraction of available height reserved as
                                     breathing room when auto-fitting the font
-    padding_mm      float, 0..10    inner whitespace around text/decor
+
+padding_mm used to live here too. It is a composition choice, not a printer
+calibration, so it moved to the editor, which sends it per print and remembers
+the last value per format. A padding_mm left in an old file is ignored.
 
 Storage: ~/.config/dymo-web/preset_overrides.json (writable by the running user).
 """
@@ -22,7 +25,6 @@ DEFAULTS = {
     'offset_x_mm':     0.0,
     'offset_y_mm':     0.0,
     'auto_fit_safety': 0.0,
-    'padding_mm':      2.0,
 }
 
 

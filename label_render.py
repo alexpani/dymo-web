@@ -120,6 +120,10 @@ TAPE_MIN_PRINTABLE_MM = 10.0              # below this a glyph has nowhere to go
 # needs more than that has offset_y_mm.
 TAPE_REGISTRATION_MM = 0.5
 
+# Inner whitespace around text and decor. A composition choice the editor makes
+# print by print, not a calibration - this is only the value it starts from.
+DEFAULT_PADDING_MM = 2.0
+
 
 def get_imageable_margins_mm(fmt):
     """Return (left, top, right, bottom) in mm for this preset's media."""
@@ -162,6 +166,14 @@ def printable_height_mm(fmt):
         return max(1.0, float(fmt['width_mm']) - 2 * TAPE_REGISTRATION_MM)
     i_w, i_h = imageable_size_mm(fmt)
     return max(1.0, min(i_w, i_h))
+
+
+def max_padding_mm(fmt):
+    """Most padding worth offering for this format, to the half millimetre.
+    Past a third of the printable height the text gets less room than the air
+    around it, and on a 9 mm tape that point arrives at 2.5 mm - which is why
+    the slider's range is per format and not a flat 0..10."""
+    return min(10.0, max(1.0, round(printable_height_mm(fmt) / 3 * 2) / 2))
 
 
 def max_font_pt(fmt):
@@ -320,7 +332,7 @@ def _layout(runs, max_width, max_height, font_size_pt=None,
 def render(fmt, runs=None,
            decor='none', qr_content='', icon_id='', decor_position='left',
            align='center', font_size_pt=None,
-           auto_fit_safety=0.0, padding_mm=2.0, line_spacing=0.2,
+           auto_fit_safety=0.0, padding_mm=DEFAULT_PADDING_MM, line_spacing=0.2,
            offset_x_mm=0.0, offset_y_mm=0.0, length_mm=None, report=None,
            text='', bold=False, italic=False, orientation='horizontal',
            # legacy aliases (older clients / curl scripts):
@@ -551,7 +563,7 @@ def _build_decor(decor, qr_content, icon_id, size_px):
 
 
 def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
-                  font_size_pt, auto_fit_safety=0.0, padding_mm=2.0,
+                  font_size_pt, auto_fit_safety=0.0, padding_mm=DEFAULT_PADDING_MM,
                   line_spacing=0.2, report=None):
     width_px = mm_to_px(fmt['width_mm'])
     height_px = mm_to_px(fmt['height_mm'])
@@ -624,7 +636,8 @@ def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
 
 
 def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
-                 padding_mm=2.0, line_spacing=0.2, length_mm=None, report=None):
+                 padding_mm=DEFAULT_PADDING_MM, line_spacing=0.2, length_mm=None,
+                 report=None):
     """
     Tape: width fixed (= tape width), length either auto-fit to the content
     (length_mm=None) or pinned so the cut label measures length_mm.

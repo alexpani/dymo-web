@@ -35,6 +35,8 @@ def get_formats():
         # area, so the editor's slider can't ask for text the printer would
         # crop.
         item['max_font_pt'] = label_render.max_font_pt(fmt)
+        item['default_padding_mm'] = label_render.DEFAULT_PADDING_MM
+        item['max_padding_mm'] = label_render.max_padding_mm(fmt)
         if fmt.get('kind') == 'tape':
             item['dead_zone_mm'] = round(label_render.TAPE_DEAD_ZONE_MM, 2)
             item['min_length_mm'] = TAPE_LENGTH_MIN_MM
@@ -62,6 +64,23 @@ def _tape_length_mm(data):
     if value <= 0:
         return None
     return min(max(value, TAPE_LENGTH_MIN_MM), TAPE_LENGTH_MAX_MM)
+
+
+# Inner whitespace is chosen per print by the editor, which remembers the last
+# value per format. It used to be a per-preset override sitting next to the
+# mechanical offsets, which put a composition choice among the calibrations.
+PADDING_MIN_MM, PADDING_MAX_MM = 0.0, 10.0
+
+
+def _padding_mm(data):
+    """Padding requested by the client, clamped; the default when it says
+    nothing (older clients, curl scripts)."""
+    raw = data.get('padding_mm')
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return label_render.DEFAULT_PADDING_MM
+    return min(max(value, PADDING_MIN_MM), PADDING_MAX_MM)
 
 
 def _render_kwargs(data, for_print=False):
@@ -101,11 +120,12 @@ def _render_kwargs(data, for_print=False):
         'align': data.get('align', 'center'),
         'orientation': data.get('orientation', 'horizontal'),
         'font_size_pt': data.get('font_size_pt') or None,
+        'padding_mm': _padding_mm(data),
         'length_mm': _tape_length_mm(data),
         'line_spacing': data.get('line_spacing') if data.get('line_spacing') is not None else 0.2,
-        # per-preset overrides (server-side authoritative)
+        # per-preset overrides (server-side authoritative: these compensate the
+        # printer, so a client can't talk us out of them)
         'auto_fit_safety': overrides['auto_fit_safety'],
-        'padding_mm':      overrides['padding_mm'],
         'offset_x_mm':     (overrides['offset_x_mm'] + cx_auto) if for_print else 0.0,
         'offset_y_mm':     (overrides['offset_y_mm'] + cy_auto) if for_print else 0.0,
     }

@@ -457,6 +457,13 @@
       <span class="size-label" id="line_spacing_label">20%</span>
     </div>
 
+    <div class="size-row">
+      <label for="padding" style="margin:0">Margine</label>
+      <input type="range" id="padding" min="0" max="10" step="0.5" value="2"
+             title="Bianco intorno a testo e decoro. L'app ricorda l'ultimo valore per ogni formato.">
+      <span class="size-label" id="padding_label">2 mm</span>
+    </div>
+
     <div class="decor-row" style="margin-top: 0.9rem;">
       <label style="margin: 0 0.5rem 0 0">Decoro</label>
       <div class="seg-group" id="decor_mode">
@@ -685,8 +692,39 @@ function syncTapeLengthRow() {
   }
 }
 
+// Last padding used, per preset name. Padding is a composition choice made
+// print by print, so it doesn't belong in the preset next to the mechanical
+// offsets - but retyping it on every format switch would be worse, hence this.
+const PADDING_KEY = 'dymo-web:padding';
+
+function paddingMemory() {
+  try { return JSON.parse(localStorage.getItem(PADDING_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+
+function rememberPadding(name, mm) {
+  try {
+    const all = paddingMemory();
+    all[name] = mm;
+    localStorage.setItem(PADDING_KEY, JSON.stringify(all));
+  } catch (e) {}
+}
+
+function syncPaddingRow() {
+  const fmt = formats[parseInt($('format').value, 10)];
+  if (!fmt) return;
+  const max = fmt.max_padding_mm || 10;
+  $('padding').max = max;
+  const seen = paddingMemory()[fmt.name];
+  const v = Math.min(max, seen != null ? seen
+          : (fmt.default_padding_mm != null ? fmt.default_padding_mm : 2));
+  $('padding').value = v;
+  $('padding_label').textContent = v + ' mm';
+}
+
 function syncFormatLimits() {
   syncTapeLengthRow();
+  syncPaddingRow();
   syncFontSizeUI();
 }
 
@@ -703,6 +741,7 @@ function getPayload() {
     orientation: state.orientation,
     font_size_pt: state.autoFont ? null : (sliderVal > 0 ? sliderVal : null),
     line_spacing: parseInt($('line_spacing').value, 10) / 100,
+    padding_mm: parseFloat($('padding').value),
     length_mm: tapeLengthValue(),
   };
 }
@@ -1069,6 +1108,13 @@ $('line_spacing').addEventListener('input', () => {
   $('line_spacing_label').textContent = $('line_spacing').value + '%';
   schedulePreview();
 });
+$('padding').addEventListener('input', () => {
+  const fmt = formats[parseInt($('format').value, 10)];
+  const v = parseFloat($('padding').value);
+  $('padding_label').textContent = v + ' mm';
+  if (fmt) rememberPadding(fmt.name, v);
+  schedulePreview();
+});
 
 // ── History ──────────────────────────────────────────────────────────────
 function escapeHtml(s) {
@@ -1108,6 +1154,10 @@ function applyPayload(payload) {
   state.align = payload.align || 'center';
   $('align_group').querySelectorAll('.seg').forEach(b =>
     b.classList.toggle('active', b.dataset.align === state.align));
+  if (payload.padding_mm != null) {
+    $('padding').value = payload.padding_mm;
+    $('padding_label').textContent = payload.padding_mm + ' mm';
+  }
   const sz = payload.font_size_pt || 0;
   state.autoFont = !sz;
   $('font_size').value = sz;

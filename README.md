@@ -42,6 +42,12 @@ Repo: [github.com/alexpani/dymo-web](https://github.com/alexpani/dymo-web)
   massimo dipende dal formato: è il corpo più grande che la stampante
   riesce ancora a stampare per intero, discendenti comprese.
 - **Slider Interlinea** 0–100% (default 20%).
+- **Slider Margine**: il bianco intorno a testo e decoro, in mm. L'app
+  ricorda l'ultimo valore **per ogni formato**, quindi lo imposti una volta
+  per il nastro da 9 mm e una per la 57×32, e poi se lo ritrova da solo. Il
+  massimo dipende dal formato (2,5 mm sul nastro da 9, 9,5 sulla 57×32):
+  oltre un terzo dell'altezza stampabile il testo avrebbe meno spazio
+  dell'aria che lo circonda.
 - **Reset** azzera l'editor; **Salva bozza** mette l'etichetta in cronologia
   senza stamparla.
 - **Persistenza in localStorage**: ricarichi la pagina e ritrovi l'ultima
@@ -112,7 +118,6 @@ click per espandere un form a due sezioni:
   Si somma alla compensation automatica calcolata dai margini PPD.
   Applicato solo alla stampa (anteprima resta centrata sull'imageable).
 - **Margine auto-fit** (0–50%) — riduzione del font massimo per più aria.
-- **Padding interno** (mm) — spazio bianco intorno a testo/decoro.
 - **Stampa calibrazione** — stampa una griglia con cornice, croce
   centrale e righelli mm (vedi sezione "Centraggio fisico" sotto).
 
