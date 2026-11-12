@@ -501,6 +501,37 @@ def render_calibration(fmt, offset_x_mm=0.0, offset_y_mm=0.0):
     return _apply_offset(img, offset_x_mm, offset_y_mm)
 
 
+def with_media_margins(img, fmt, length_mm=None):
+    """Pad a rendered canvas out to the whole piece of media. Preview only.
+
+    What render() returns is the printable area: the imageable area of a
+    pre-cut label, or the tape run minus the dead zone. The media in the
+    user's hand is bigger, and the difference is white they can see on it -
+    1 mm along each long edge of an 11354, 10.6 mm at each end of any cut
+    tape. A preview without it shows the text nearer the edge than it will
+    ever be, and a tape looking full when a third of it is blank.
+
+    The canvas goes in the middle, which is where the print pipeline puts it:
+    the tape dead zone is symmetric, and the labels' asymmetric hardware
+    margins are exactly what centring_offset_mm cancels at print time.
+
+    Never for the bytes sent to the printer: there the media margins are the
+    printer's own doing, and drawing them would ask for them twice.
+    """
+    if fmt.get('kind') == 'tape':
+        media_w_mm = length_mm or (img.size[0] / DPI * 25.4 + TAPE_DEAD_ZONE_MM)
+        media_h_mm = float(fmt['width_mm'])
+    else:
+        media_w_mm, media_h_mm = float(fmt['width_mm']), float(fmt['height_mm'])
+    w = max(img.size[0], mm_to_px(media_w_mm))
+    h = max(img.size[1], mm_to_px(media_h_mm))
+    if (w, h) == img.size:
+        return img
+    out = Image.new(img.mode, (w, h), 'white')
+    out.paste(img, ((w - img.size[0]) // 2, (h - img.size[1]) // 2))
+    return out
+
+
 def _apply_offset(img, offset_x_mm, offset_y_mm):
     """Translate the rendered content by (ox, oy) mm to compensate mechanical
     printer misalignment. Pixels shifted out of frame are cropped; the freed

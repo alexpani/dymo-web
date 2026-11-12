@@ -48,8 +48,10 @@ app.py              Flask routes + waitress runner.
                     parsing del payload e applica gli override del preset
                     corrente leggendoli da presets_store.
                     for_print=True applica anche l'offset meccanico;
-                    /api/preview usa False, /api/print usa True, e torna
-                    in X-Font-Size-Pt il corpo che il render ha usato.
+                    /api/preview usa False, allarga il PNG al supporto
+                    fisico con with_media_margins (il bianco che la
+                    stampante lascia si vede), e torna in X-Font-Size-Pt
+                    il corpo che il render ha usato; /api/print usa True.
                     _tape_length_mm() valida/clampa la lunghezza nastro
                     richiesta; /api/formats espone dead_zone_mm e i
                     min/max ai preset tape, così il frontend non
@@ -71,6 +73,9 @@ label_render.py     FORMATS (seed dei preset built-in). render() dispatch
                     scrivere (nastro meno il registro, o lato corto
                     dell'imageable area); max_font_pt() ne ricava il corpo
                     massimo (esposto da /api/formats).
+                    with_media_margins() allarga un canvas renderizzato
+                    fino al supporto intero (etichetta o nastro tagliato),
+                    centrandocelo: serve all'anteprima, mai alla stampa.
                     PPD_IMAGEABLE_MARGINS_MM mappa le imageable areas per
                     media DYMO; centring_offset_mm() restituisce lo shift
                     da applicare in stampa per portare il centro logico

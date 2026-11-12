@@ -756,8 +756,8 @@ function syncFormatButtons() {
 async function updatePreview() {
   const payload = getPayload();
   const fmt = formats[payload.format];
-  // For tape the preview shows the printable run only; the dead zone is blank
-  // tape the printer adds, so we spell out both numbers instead of drawing it.
+  // The preview draws the whole piece of media, blank margins included, so
+  // the meta line is just the numbers behind what you're looking at.
   const len = payload.length_mm;
   $('preview_meta').textContent = fmt.kind === 'tape'
     ? (len

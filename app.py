@@ -148,7 +148,12 @@ def preview():
     render actually used, so an editor sitting in auto-fit can show it."""
     try:
         report = {}
-        img = render(report=report, **_render_kwargs(request.get_json(), for_print=False))
+        kwargs = _render_kwargs(request.get_json(), for_print=False)
+        # Show the whole piece of media, not just the printable area: the
+        # white the printer leaves around the content is part of what comes
+        # out, and the tape dead zone is a third of a short label.
+        img = label_render.with_media_margins(
+            render(report=report, **kwargs), kwargs['fmt'], kwargs['length_mm'])
         buf = io.BytesIO()
         img.save(buf, format='PNG')
         buf.seek(0)
