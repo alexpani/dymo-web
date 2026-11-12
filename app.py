@@ -33,10 +33,12 @@ def get_formats():
         item = {'index': i, **fmt, 'cups_media': resolve_cups_media(fmt)}
         # Largest forced font size whose ink still lands on the printable
         # area, so the editor's slider can't ask for text the printer would
-        # crop.
-        item['max_font_pt'] = label_render.max_font_pt(fmt)
+        # crop. The preset's print shift eats into that area (see
+        # printable_height_mm), so the cap has to know about it.
+        shift_y = _print_shift_mm(fmt)[1]
+        item['max_font_pt'] = label_render.max_font_pt(fmt, shift_y)
         item['default_padding_mm'] = label_render.DEFAULT_PADDING_MM
-        item['max_padding_mm'] = label_render.max_padding_mm(fmt)
+        item['max_padding_mm'] = label_render.max_padding_mm(fmt, shift_y)
         if fmt.get('kind') == 'tape':
             item['dead_zone_mm'] = round(label_render.TAPE_DEAD_ZONE_MM, 2)
             item['min_length_mm'] = TAPE_LENGTH_MIN_MM
@@ -83,14 +85,28 @@ def _padding_mm(data):
     return min(max(value, PADDING_MIN_MM), PADDING_MAX_MM)
 
 
+def _print_shift_mm(fmt):
+    """(dx, dy) in mm the printed bitmap gets translated by for this preset:
+    the user's calibration override plus the automatic centring compensation
+    for the PPD's asymmetric hardware margins (DYMO leaves ~5-6 mm at the top
+    of a pre-cut label, ~1.5 mm at the bottom, for the leading-edge sensor)."""
+    overrides = presets_store.get(fmt['name'])
+    cx_auto, cy_auto = centring_offset_mm(fmt)
+    return (overrides['offset_x_mm'] + cx_auto, overrides['offset_y_mm'] + cy_auto)
+
+
 def _render_kwargs(data, for_print=False):
     """
     Build render() kwargs from the API payload + per-preset overrides.
 
     The mechanical print offset (offset_x/y_mm) compensates a printer-side
-    misalignment, so it must be applied to the bytes sent to the printer
-    but NOT to the on-screen preview — otherwise the preview shows the
-    shifted layout, which is misleading. We force offsets to 0 for previews.
+    misalignment, so the *translation* belongs to the bytes sent to the
+    printer and not to the on-screen preview — a preview showing the shifted
+    layout looks like a rendering bug. The offsets themselves go to render()
+    either way: whichever side the bitmap is going to move towards is a side
+    the content can't use, and a preview that laid out text on it would
+    promise a size the printer then crops (which is what 19 mm tape did,
+    losing the top of its first line).
     """
     presets = presets_catalog.load()
     fmt_index = data.get('format', 0)
@@ -98,12 +114,7 @@ def _render_kwargs(data, for_print=False):
         fmt_index = 0
     fmt = presets[fmt_index]
     overrides = presets_store.get(fmt['name'])
-    # Auto-centring: shift the printed bitmap so that its centre lands on the
-    # *physical* centre of the label, compensating for the PPD's asymmetric
-    # hardware margins (DYMO leaves ~5-6 mm at the top, ~1.5 mm at the bottom
-    # for the leading-edge sensor). Only at print time; previews stay centred
-    # on the imageable area so what you see is what's between the margins.
-    cx_auto, cy_auto = centring_offset_mm(fmt)
+    shift_x, shift_y = _print_shift_mm(fmt)
     return {
         'fmt': fmt,
         'runs': data.get('runs'),
@@ -126,8 +137,9 @@ def _render_kwargs(data, for_print=False):
         # per-preset overrides (server-side authoritative: these compensate the
         # printer, so a client can't talk us out of them)
         'auto_fit_safety': overrides['auto_fit_safety'],
-        'offset_x_mm':     (overrides['offset_x_mm'] + cx_auto) if for_print else 0.0,
-        'offset_y_mm':     (overrides['offset_y_mm'] + cy_auto) if for_print else 0.0,
+        'offset_x_mm':     shift_x,
+        'offset_y_mm':     shift_y,
+        'for_print':       for_print,
     }
 
 @app.route('/api/preview', methods=['POST'])

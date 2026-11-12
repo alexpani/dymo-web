@@ -419,6 +419,35 @@ Resta valido dal tentativo sbagliato, e vale la pena tenerlo:
 - `_draw_lines` sborda **simmetrico** quando il blocco non ci sta: prima
   `max(0, ...)` lo faceva colare tutto in basso, cioè tutto da un lato solo.
 
+### Un offset di stampa costa il doppio di sé stesso in area stampabile
+Il 19 mm ha `offset_y_mm: -2.5` perché il meccanismo posa il bitmap 2,5 mm
+più in basso. Ma `_apply_offset` trasla una tela che il contenuto riempie
+già: quei 2,5 mm vengono **tagliati** in cima, e sul nastro gli stessi
+2,5 mm in fondo sono dove la testina non arriva più. Il contenuto resta
+centrato fra i due, quindi l'altezza utile cala di `2 × |offset|`: su un
+nastro da 19 mm da 18 a 13 mm.
+
+Finché il layout non lo sapeva, l'auto-fit sceglieva il corpo su 18 mm e la
+prima riga usciva mozzata in cima. Verificato sulla foto di una stampa a
+3 righe: inchiostro da 2,8 a 16,8 mm sul nastro invece che da 2,2 a 16,7 —
+cioè la traslazione di 2,5 mm, esatta, col sopravanzo buttato via dal crop.
+
+Perciò `printable_height_mm(fmt, shift_y_mm)` sottrae `2×|shift|`; `render()`
+riceve **sempre** gli offset e `for_print` decide solo se *traslare*;
+`_render_label`/`_render_tape` li sommano al padding come margine inviolabile;
+`/api/formats` passa lo shift del preset a `max_font_pt` e `max_padding_mm`
+(19 mm: 53 → 38 pt, 24 mm: 67 → 50 pt).
+
+Corollario: l'anteprima deve conoscere gli offset anche se non li applica,
+altrimenti promette un corpo che la stampa taglia. Resta vero che non deve
+*mostrarli*: il contenuto va disegnato dov'è, solo in uno spazio più stretto.
+
+Corollario sulla calibrazione: con un offset ≠ 0 la cornice del pattern
+**perde per forza** il lato verso cui si trasla — sul 19 mm il lato lungo in
+alto e le tacche del righello superiore. Non è un errore di registro da
+compensare, è il crop. Il lato opposto resta a filo e vale ancora come
+misura.
+
 ### Il cursore in Auto è un display, non un valore
 Richiesta dell'utente: in auto-fit il cursore deve mostrare la misura scelta.
 Il tranello è che spostarci il cursore e basta spegnerebbe l'auto-fit al

@@ -157,32 +157,41 @@ def centring_offset_mm(fmt):
 LINE_INK_EM = 0.96
 
 
-def printable_height_mm(fmt):
+def printable_height_mm(fmt, shift_y_mm=0.0):
     """Height the printer can actually put ink on, across the label or tape.
     For pre-cut labels we take the short side of the imageable area, so the
     figure holds for orientation='vertical' too (there the canvas is swapped
-    before rendering)."""
+    before rendering).
+
+    A print shift costs twice its own size, so it has to be part of this
+    figure. _apply_offset translates the bitmap inside a canvas it already
+    fills, so |shift| is cropped off the side it moves towards; on the paper
+    it is the opposite edge the head then no longer reaches. The content stays
+    centred between the two, which is what makes it symmetric."""
     if fmt.get('kind') == 'tape':
-        return max(1.0, float(fmt['width_mm']) - 2 * TAPE_REGISTRATION_MM)
-    i_w, i_h = imageable_size_mm(fmt)
-    return max(1.0, min(i_w, i_h))
+        height = float(fmt['width_mm']) - 2 * TAPE_REGISTRATION_MM
+    else:
+        i_w, i_h = imageable_size_mm(fmt)
+        height = min(i_w, i_h)
+    return max(1.0, height - 2 * abs(shift_y_mm))
 
 
-def max_padding_mm(fmt):
+def max_padding_mm(fmt, shift_y_mm=0.0):
     """Most padding worth offering for this format, to the half millimetre.
     Past a third of the printable height the text gets less room than the air
     around it, and on a 9 mm tape that point arrives at 2.5 mm - which is why
     the slider's range is per format and not a flat 0..10."""
-    return min(10.0, max(1.0, round(printable_height_mm(fmt) / 3 * 2) / 2))
+    return min(10.0, max(1.0, round(printable_height_mm(fmt, shift_y_mm) / 3 * 2) / 2))
 
 
-def max_font_pt(fmt):
+def max_font_pt(fmt, shift_y_mm=0.0):
     """Largest point size whose ink still lands inside the printable height,
     descenders included. The editor caps its slider with this, so a forced size
     can't silently run off the label. Padding is deliberately not subtracted:
     it is a layout preference and a block too tall for it merely spills into
-    it, while the printable area is physics."""
-    return max(6, int(printable_height_mm(fmt) / LINE_INK_EM / 25.4 * 72))
+    it, while the printable area is physics. The preset's print shift is
+    subtracted, because that is physics too - see printable_height_mm."""
+    return max(6, int(printable_height_mm(fmt, shift_y_mm) / LINE_INK_EM / 25.4 * 72))
 
 
 def _load_font(size, bold=False, italic=False):
@@ -333,7 +342,8 @@ def render(fmt, runs=None,
            decor='none', qr_content='', icon_id='', decor_position='left',
            align='center', font_size_pt=None,
            auto_fit_safety=0.0, padding_mm=DEFAULT_PADDING_MM, line_spacing=0.2,
-           offset_x_mm=0.0, offset_y_mm=0.0, length_mm=None, report=None,
+           offset_x_mm=0.0, offset_y_mm=0.0, for_print=False,
+           length_mm=None, report=None,
            text='', bold=False, italic=False, orientation='horizontal',
            # legacy aliases (older clients / curl scripts):
            qr_enabled=False, qr_position=None):
@@ -350,6 +360,14 @@ def render(fmt, runs=None,
     runs:            list of {text, bold, italic}; '\\n' splits paragraphs
     align:           text alignment within its area
     font_size_pt:    int forced size, or None for auto-fit
+    offset_x/y_mm:   the mechanical shift this preset needs. The layout always
+                     keeps that much clear of both edges so the shift can't
+                     crop the content (and so the preview shows the size that
+                     will actually print); the translation itself happens only
+                     when for_print is set.
+    for_print:       True to translate the bitmap by the offsets, False for a
+                     preview — a preview that showed the shift would look like
+                     a rendering bug.
     length_mm:       tape only — total tape length in mm, cut to cut, as
                      measured with a ruler. TAPE_DEAD_ZONE_MM of that is blank
                      leader+trailer the mechanism adds; the text shrinks (and
@@ -376,7 +394,7 @@ def render(fmt, runs=None,
     if fmt.get('kind') == 'tape':
         img = _render_tape(fmt, runs, align, font_size_pt,
                            auto_fit_safety, padding_mm, line_spacing, length_mm,
-                           report)
+                           report, offset_x_mm, offset_y_mm)
     else:
         # Render at the imageable size (paper minus PPD hardware margins),
         # so the print pipeline can ship the PNG as-is — no fit-to-page,
@@ -386,13 +404,16 @@ def render(fmt, runs=None,
         if is_vertical:
             i_w, i_h = i_h, i_w
         fmt_eff = {**fmt, 'width_mm': i_w, 'height_mm': i_h}
+        # The canvas is swapped before the 90 degree rotation, so the axes the
+        # shift has to stay clear of are swapped with it.
+        shift = (offset_y_mm, offset_x_mm) if is_vertical else (offset_x_mm, offset_y_mm)
         img = _render_label(fmt_eff, runs, decor, qr_content, icon_id, decor_position,
                             align, font_size_pt, auto_fit_safety, padding_mm,
-                            line_spacing, report)
+                            line_spacing, report, shift[0], shift[1])
 
     if is_vertical:
         img = img.rotate(-90, expand=True)
-    return _apply_offset(img, offset_x_mm, offset_y_mm)
+    return _apply_offset(img, offset_x_mm, offset_y_mm) if for_print else img
 
 
 def render_calibration(fmt, offset_x_mm=0.0, offset_y_mm=0.0):
@@ -568,10 +589,14 @@ def _build_decor(decor, qr_content, icon_id, size_px):
 
 def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
                   font_size_pt, auto_fit_safety=0.0, padding_mm=DEFAULT_PADDING_MM,
-                  line_spacing=0.2, report=None):
+                  line_spacing=0.2, report=None, shift_x_mm=0.0, shift_y_mm=0.0):
     width_px = mm_to_px(fmt['width_mm'])
     height_px = mm_to_px(fmt['height_mm'])
-    pad = mm_to_px(padding_mm)
+    # The print shift translates this canvas bodily, so everything drawn on it
+    # keeps |shift| clear of both edges: that much is cropped on one side and
+    # unreachable on the other. It reads as extra padding, but it is physics.
+    pad_x = mm_to_px(padding_mm + abs(shift_x_mm))
+    pad_y = mm_to_px(padding_mm + abs(shift_y_mm))
 
     img = Image.new('RGB', (width_px, height_px), 'white')
     draw = ImageDraw.Draw(img)
@@ -586,7 +611,7 @@ def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
 
     if has_decor and not has_text:
         # Centered: as big as the shorter side allows, leaving padding
-        size = max(20, min(width_px, height_px) - 2 * pad)
+        size = max(20, min(width_px - 2 * pad_x, height_px - 2 * pad_y))
         d_img = _build_decor(decor, qr_content, icon_id, size)
         if d_img is not None:
             dx = (width_px - d_img.size[0]) // 2
@@ -597,33 +622,33 @@ def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
                 img.paste(d_img, (dx, dy))
         return img
 
-    text_x, text_y = pad, pad
-    text_w = width_px - 2 * pad
-    text_h = height_px - 2 * pad
+    text_x, text_y = pad_x, pad_y
+    text_w = width_px - 2 * pad_x
+    text_h = height_px - 2 * pad_y
 
     if has_decor:
         if decor_position in ('left', 'right'):
-            d_size = max(20, min(height_px - 2 * pad, width_px // 3))
+            d_size = max(20, min(height_px - 2 * pad_y, width_px // 3))
         else:  # top, bottom
-            d_size = max(20, min(width_px - 2 * pad, height_px // 3))
+            d_size = max(20, min(width_px - 2 * pad_x, height_px // 3))
         d_img = _build_decor(decor, qr_content, icon_id, d_size)
 
         if d_img is not None:
             dw, dh = d_img.size
             if decor_position == 'left':
-                dx, dy = pad, (height_px - dh) // 2
-                text_x = dx + dw + pad
-                text_w = width_px - text_x - pad
+                dx, dy = pad_x, (height_px - dh) // 2
+                text_x = dx + dw + pad_x
+                text_w = width_px - text_x - pad_x
             elif decor_position == 'right':
-                dx, dy = width_px - dw - pad, (height_px - dh) // 2
-                text_w = dx - 2 * pad
+                dx, dy = width_px - dw - pad_x, (height_px - dh) // 2
+                text_w = dx - 2 * pad_x
             elif decor_position == 'top':
-                dx, dy = (width_px - dw) // 2, pad
-                text_y = dy + dh + pad
-                text_h = height_px - text_y - pad
+                dx, dy = (width_px - dw) // 2, pad_y
+                text_y = dy + dh + pad_y
+                text_h = height_px - text_y - pad_y
             else:  # bottom
-                dx, dy = (width_px - dw) // 2, height_px - dh - pad
-                text_h = dy - 2 * pad
+                dx, dy = (width_px - dw) // 2, height_px - dh - pad_y
+                text_h = dy - 2 * pad_y
             if d_img.mode == 'RGBA':
                 _paste_icon(img, d_img, (dx, dy))
             else:
@@ -641,7 +666,7 @@ def _render_label(fmt, runs, decor, qr_content, icon_id, decor_position, align,
 
 def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
                  padding_mm=DEFAULT_PADDING_MM, line_spacing=0.2, length_mm=None,
-                 report=None):
+                 report=None, shift_x_mm=0.0, shift_y_mm=0.0):
     """
     Tape: width fixed (= tape width), length either auto-fit to the content
     (length_mm=None) or pinned so the cut label measures length_mm.
@@ -657,7 +682,7 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
     length_mm of tape in hand.
 
     Across the tape the text is held inside printable_height_mm(), which keeps
-    TAPE_REGISTRATION_MM at each edge: the head reaches the whole width, but
+    TAPE_REGISTRATION_MM plus the preset's print shift at each edge: the head reaches the whole width, but
     the bitmap lands about 0.3 mm off centre and a glyph flush with the edge
     would lose that much. The PNG still spans the whole tape (the pipeline
     reads the media width off it) and the band is centred.
@@ -665,13 +690,13 @@ def _render_tape(fmt, runs, align, font_size_pt, auto_fit_safety=0.0,
     padding_mm is split: ~75% horizontally (along the tape) and 50% vertically
     (across the narrow tape width — even less air would crowd the glyphs).
     """
-    height_px = mm_to_px(fmt['width_mm'])         # PNG height = tape width
-    band_px = mm_to_px(printable_height_mm(fmt))  # minus registration slop
+    height_px = mm_to_px(fmt['width_mm'])                     # PNG height = tape width
+    band_px = mm_to_px(printable_height_mm(fmt, shift_y_mm))  # minus slop and shift
     min_length_px = mm_to_px(fmt['height_mm'])    # minimum PNG length
     max_length_px = mm_to_px(1400)                # cap (CUPS w*h4000 ~= 1411 mm)
 
     pad_short = mm_to_px(max(0.5, padding_mm * 0.75))
-    pad_long = mm_to_px(padding_mm)
+    pad_long = mm_to_px(padding_mm + abs(shift_x_mm))
     text_h = max(10, band_px - 2 * pad_short)
     text_y = (height_px - text_h) // 2
 
