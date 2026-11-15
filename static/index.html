@@ -250,6 +250,29 @@
   button.secondary:hover { background: #f0f0f3; }
   button.secondary:disabled { opacity: 0.5; cursor: not-allowed; }
   .action-row { display: flex; gap: 0.5rem; }
+  .copies {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: white;
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-bottom: 0;
+    cursor: text;
+  }
+  .copies input {
+    width: 2.6rem;
+    border: none;
+    background: transparent;
+    font-size: 1rem;
+    font-family: inherit;
+    color: var(--text);
+    text-align: center;
+  }
+  .copies input:focus { outline: none; }
   .status {
     margin-top: 0.75rem;
     padding: 0.6rem 0.8rem;
@@ -509,6 +532,9 @@
   <div class="card">
     <div class="action-row">
       <button class="secondary" id="reset_btn" title="Cancella editor e cursori">Reset</button>
+      <label class="copies" title="Quante etichette stampare">×
+        <input type="number" id="copies" min="1" max="20" value="1" inputmode="numeric" aria-label="Numero di copie">
+      </label>
       <button class="primary" id="print_btn">Stampa</button>
       <button class="secondary" id="draft_btn" title="Salva nella cronologia senza stampare">Salva bozza</button>
     </div>
@@ -896,6 +922,9 @@ async function doPrint() {
 
   const payload = getPayload();
   payload.printer_name = $('printer').value;
+  const copies = Math.min(20, Math.max(1, parseInt($('copies').value, 10) || 1));
+  $('copies').value = copies;
+  payload.copies = copies;
 
   if (!payload.printer_name) {
     status.className = 'status err';
@@ -904,7 +933,7 @@ async function doPrint() {
   }
 
   btn.disabled = true;
-  btn.textContent = 'Stampa in corso...';
+  btn.textContent = copies > 1 ? `Stampa di ${copies} in corso...` : 'Stampa in corso...';
   try {
     const res = await fetch('/api/print', {
       method: 'POST',
@@ -914,7 +943,7 @@ async function doPrint() {
     const data = await res.json();
     if (data.ok) {
       // Brief visual confirmation on the button itself, no status message
-      btn.textContent = 'Stampa ✓';
+      btn.textContent = copies > 1 ? `Stampate ${copies} ✓` : 'Stampa ✓';
       setTimeout(() => { btn.disabled = false; btn.textContent = 'Stampa'; }, 1800);
       loadHistory();
       return;

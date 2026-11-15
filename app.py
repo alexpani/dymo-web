@@ -169,6 +169,18 @@ def get_printers():
     """Return CUPS printer list."""
     return jsonify(list_printers())
 
+MAX_COPIES = 20
+
+
+def _copies(value):
+    """Number of copies requested, clamped to 1..MAX_COPIES (missing → 1)."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(MAX_COPIES, n))
+
+
 @app.route('/api/print', methods=['POST'])
 def print_endpoint():
     """Render a label and send it to a CUPS printer."""
@@ -178,14 +190,27 @@ def print_endpoint():
         return jsonify({'ok': False, 'message': 'printer_name is required'}), 400
 
     try:
+        copies = _copies(data.get('copies'))
         kwargs = _render_kwargs(data, for_print=True)
         img = render(**kwargs)
-        ok, message = print_label(printer_name, img, kwargs['fmt'])
+        # One job per copy: the gateway/direct path writes a single raster
+        # page per call, and the Duo cuts/feeds each one like a normal print.
+        for done in range(copies):
+            ok, message = print_label(printer_name, img, kwargs['fmt'])
+            if not ok:
+                if done:
+                    message = f'{done}/{copies} printed, then: {message}'
+                break
+        else:
+            if copies > 1:
+                message = f'{copies} copies: {message}'
         if ok:
             try:
                 meta = {**kwargs['fmt']}
-                # Don't store the printer_name in the history (it changes per host)
-                payload = {k: v for k, v in data.items() if k != 'printer_name'}
+                # printer_name changes per host and copies isn't part of what
+                # the label looks like: keeping it would break the history de-dup.
+                payload = {k: v for k, v in data.items()
+                           if k not in ('printer_name', 'copies')}
                 history.add(payload, meta, img)
             except Exception:
                 pass  # history failure shouldn't fail the print
